@@ -1,0 +1,29 @@
+---
+description: Instructions for how to observe file changes and build errors when apps are running with hot reload
+globs: *
+alwaysApply: false
+---
+
+# Watching for build errors
+
+## Client project
+
+Run `npm run dev` to start the client project and also watch for changes and rebuild/run them
+When executing in background, you should `cd client; npm run dev` to change directory into client and run the client project
+Run `Get-CimInstance Win32_Process | Where-Object {$_.Name -eq "node.exe"} | Where-Object {$_.CommandLine -like "* dev"}` to find the processes that are running in the background
+
+## Server project
+
+Run `dotnet watch run` to start the server project and also watch for changes and rebuild/run them
+When executing in background, you should `cd client; dotnet watch run` to change directory into client and run the client project
+Run `Get-CimInstance Win32_Process | Where-Object {$_.Name -eq "dotnet.exe"} | Where-Object {$_.CommandLine -like "*watch*"}` to find the processes that are running in the background
+
+## Observe for Errors
+
+When making changes keep peeking at the background processes (terminal) for any errors. This way you don't have to constantly keep rebuilding. But to observe these errors, use `Start-Sleep 3` to sleep a bit before checking for errors
+
+## Debugging
+
+Use logs for debugging, which will also appear in above consoles. Use them to make sure you're abe to debug
+
+Use `playwright` to use browser and debug the application

@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # SvelteKit Client
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:5000
+      - VITE_WS_BASE_URL=ws://localhost:5000
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+    depends_on:
+      - server
+
+  # ASP.NET Server
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=Server=db;Database=AIChat;User Id=sa;Password=YourPassword123!;TrustServerCertificate=true;
+      - OpenAI__ApiKey=${OPENAI_API_KEY}
+      - Jwt__SecretKey=your-super-secret-jwt-key-that-should-be-changed-in-production
+      - Jwt__Issuer=AIChat
+      - Jwt__Audience=AIChat
+    volumes:
+      - ./server:/app
+      - /app/bin
+      - /app/obj
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # SQL Server Database
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourPassword123!
+      - MSSQL_PID=Express
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P YourPassword123! -Q 'SELECT 1'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+volumes:
+  mssql_data:
+  redis_data:
+
+networks:
+  default:
+    name: aichat-network

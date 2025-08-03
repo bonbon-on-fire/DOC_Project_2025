@@ -1,0 +1,6 @@
+@AIChat.Server_HostAddress = http://localhost:5130
+
+GET {{AIChat.Server_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
