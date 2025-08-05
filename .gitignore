@@ -178,3 +178,5 @@ msbuild.wrn
 
 # Vercel
 .vercel
+server/aichat_dev.db-wal
+server/aichat_dev.db-shm

@@ -2,11 +2,6 @@
 trigger: always_on
 ---
 
----
-description: Instructions for how to observe file changes and build errors when apps are running with hot reload
-globs: *
-alwaysApply: false
----
 
 # Watching for build errors
 
