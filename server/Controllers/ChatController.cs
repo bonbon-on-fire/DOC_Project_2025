@@ -3,6 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using AIChat.Server.Data;
 using AIChat.Server.Models;
 using AIChat.Server.Services;
+using AchieveAi.LmDotnetTools.LmCore.Agents;
+using AchieveAi.LmDotnetTools.LmCore.Messages;
+using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace AIChat.Server.Controllers;
 
@@ -13,12 +17,14 @@ public class ChatController : ControllerBase
     private readonly AIChatDbContext _dbContext;
     private readonly IOpenAIService _openAIService;
     private readonly ILogger<ChatController> _logger;
+    private readonly IStreamingAgent? _streamingAgent;
 
-    public ChatController(AIChatDbContext dbContext, IOpenAIService openAIService, ILogger<ChatController> logger)
+    public ChatController(AIChatDbContext dbContext, IOpenAIService openAIService, ILogger<ChatController> logger, IStreamingAgent? streamingAgent = null)
     {
         _dbContext = dbContext;
         _openAIService = openAIService;
         _logger = logger;
+        _streamingAgent = streamingAgent;
     }
 
     // GET: api/chat/history?userId={userId}&page={page}&pageSize={pageSize}
@@ -159,14 +165,55 @@ public class ChatController : ControllerBase
 
             await _dbContext.SaveChangesAsync();
 
-            // Mock AI response for testing (replace with real OpenAI integration later)
-            var mockAiResponse = $"Hello! I'm an AI assistant. You said: \"{request.Message}\". This is a mock response for testing purposes. The chat functionality is working perfectly!";
+            string aiResponse;
+            if (_streamingAgent != null)
+            {
+                // Use IStreamingAgent for AI response
+                try
+                {
+                    // Get conversation history for context
+                    var conversationHistory = await _dbContext.Messages
+                        .Where(m => m.ChatId == chat.Id)
+                        .OrderBy(m => m.Timestamp)
+                        .ToListAsync();
+
+                    var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
+                    
+                    // Generate response using IStreamingAgent (non-streaming)
+                    var messages = await _streamingAgent.GenerateReplyAsync(lmMessages);
+                    aiResponse = string.Join("", messages.OfType<TextMessage>().Select(m => m.Text));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error generating AI response with IStreamingAgent");
+                    aiResponse = $"Error: Failed to generate AI response. {ex.Message}";
+                }
+            }
+            else
+            {
+                // Fallback to existing OpenAIService
+                try
+                {
+                    // Get conversation history for context
+                    var conversationHistory = await _dbContext.Messages
+                        .Where(m => m.ChatId == chat.Id)
+                        .OrderBy(m => m.Timestamp)
+                        .ToListAsync();
+
+                    aiResponse = await _openAIService.GenerateResponseAsync(conversationHistory);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error generating AI response with OpenAIService");
+                    aiResponse = $"Error: Failed to generate AI response. {ex.Message}";
+                }
+            }
             
             var assistantMessage = new Message
             {
                 ChatId = chat.Id,
                 Role = "assistant",
-                Content = mockAiResponse,
+                Content = aiResponse,
                 Timestamp = DateTime.UtcNow
             };
 
@@ -195,7 +242,7 @@ public class ChatController : ControllerBase
                         Id = assistantMessage.Id,
                         ChatId = chat.Id,
                         Role = "assistant",
-                        Content = mockAiResponse,
+                        Content = aiResponse,
                         Timestamp = assistantMessage.Timestamp
                     }
                 },
@@ -210,6 +257,137 @@ public class ChatController : ControllerBase
             _logger.LogError(ex, "Error creating chat");
             return StatusCode(500, new { Error = "Failed to create chat" });
         }
+    }
+
+    // POST: api/chat/stream
+    [HttpPost("stream")]
+    public async IAsyncEnumerable<string> StreamChatCompletion(
+        [FromBody] CreateChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        // Validate streaming agent is available
+        if (_streamingAgent == null)
+        {
+            _logger.LogWarning("Streaming agent not configured");
+            yield return "Error: Streaming agent not configured";
+            yield break;
+        }
+
+        // Use a simple approach without try-catch around yield return
+        await foreach (var content in StreamChatCompletionImpl(request, cancellationToken))
+        {
+            yield return content;
+        }
+    }
+
+    private async IAsyncEnumerable<string> StreamChatCompletionImpl(
+        CreateChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        // Create new chat
+        var chat = new Chat
+        {
+            UserId = request.UserId,
+            Title = GenerateChatTitle(request.Message),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _dbContext.Chats.Add(chat);
+
+        // Add initial user message
+        var userMessage = new Message
+        {
+            ChatId = chat.Id,
+            Role = "user",
+            Content = request.Message,
+            Timestamp = DateTime.UtcNow
+        };
+
+        _dbContext.Messages.Add(userMessage);
+
+        // Add system prompt if provided
+        if (!string.IsNullOrEmpty(request.SystemPrompt))
+        {
+            var systemMessage = new Message
+            {
+                ChatId = chat.Id,
+                Role = "system",
+                Content = request.SystemPrompt,
+                Timestamp = DateTime.UtcNow.AddMilliseconds(-1) // Ensure system message comes first
+            };
+
+            _dbContext.Messages.Add(systemMessage);
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        // Convert project messages to LmDotnetTools messages
+        var conversationHistory = await _dbContext.Messages
+            .Where(m => m.ChatId == chat.Id)
+            .OrderBy(m => m.Timestamp)
+            .ToListAsync(cancellationToken);
+
+        var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
+
+        // Generate streaming response using IStreamingAgent
+        var streamingResponse = await _streamingAgent!.GenerateReplyStreamingAsync(
+            lmMessages,
+            cancellationToken: cancellationToken);
+
+        // Buffer to accumulate partial responses for saving to database
+        var responseBuffer = new StringBuilder();
+        var assistantMessage = new Message
+        {
+            ChatId = chat.Id,
+            Role = "assistant",
+            Content = "",
+            Timestamp = DateTime.UtcNow
+        };
+
+        await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
+        {
+            if (message is TextMessage textMessage)
+            {
+                var content = textMessage.Text;
+                if (!string.IsNullOrEmpty(content))
+                {
+                    // Yield the content for streaming to client
+                    yield return content;
+                    
+                    // Accumulate content for saving
+                    responseBuffer.Append(content);
+                }
+            }
+        }
+
+        // Save the complete assistant response
+        assistantMessage.Content = responseBuffer.ToString();
+        _dbContext.Messages.Add(assistantMessage);
+        chat.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync();
+    }
+
+    // Helper method to convert project Message to LmDotnetTools IMessage
+    private static IMessage ConvertToLmMessage(Message message)
+    {
+        var role = message.Role.ToLowerInvariant() switch
+        {
+            "user" => Role.User,
+            "assistant" => Role.Assistant,
+            "system" => Role.System,
+            _ => Role.User
+        };
+
+        return new TextMessage
+        {
+            Role = role,
+            Text = message.Content,
+            FromAgent = null,
+            GenerationId = null,
+            Metadata = null,
+            IsThinking = false
+        };
     }
 
     // DELETE: api/chat/{id}

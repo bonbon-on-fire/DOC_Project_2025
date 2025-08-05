@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using AIChat.Server.Data;
 using AIChat.Server.Services;
 using AIChat.Server.Hubs;
+using AchieveAi.LmDotnetTools.LmConfig.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,12 +21,15 @@ builder.Services.AddSignalR();
 // Add custom services
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();
 
+// Add LmConfig services
+builder.Services.AddLmConfig(builder.Configuration);
+
 // Add CORS for development
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowSvelteApp", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://localhost:4173")
+        policy.WithOrigins("http://localhost:5173", "http://localhost:4173", "http://localhost:5174")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();

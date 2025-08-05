@@ -1,0 +1,3 @@
+[submodule "submodules/LmDotnetTools"]
+	path = submodules/LmDotnetTools
+	url = https://github.com/achieveai/LmDotnetTools.git
