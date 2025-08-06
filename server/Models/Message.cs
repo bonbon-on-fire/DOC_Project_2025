@@ -21,6 +21,9 @@ public class Message
 
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 
+    [Required]
+    public int SequenceNumber { get; set; }
+
     // Navigation properties
     public virtual Chat Chat { get; set; } = null!;
 }

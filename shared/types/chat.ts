@@ -6,6 +6,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: Date;
+  sequenceNumber: number;
 }
 
 export interface Chat {

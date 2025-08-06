@@ -1,21 +1,94 @@
 <script lang="ts">
+  import { onMount, afterUpdate } from 'svelte';
   import type { MessageDto } from '$lib/types/chat';
+  import { isStreaming } from '$lib/stores/chat';
   import MessageBubble from './MessageBubble.svelte';
-  import StreamingMessage from './StreamingMessage.svelte';
-
   export let messages: MessageDto[] = [];
-  export let streamingMessages: Map<string, string>;
 
-  // Convert streaming messages map to array for display
-  $: streamingArray = Array.from(streamingMessages.entries()).map(([id, content]) => ({
-    id,
-    content,
-    role: 'assistant' as const
-  }));
+  let chatContainer: HTMLDivElement;
+  let userHasScrolled = false;
+  let previousMessageCount = 0;
+  let isAutoScrolling = false;
+  let previousStreamingState = false;
+
+  // Track total message count for detecting new messages
+  $: totalMessages = messages.length;
+  
+  // Watch for streaming state changes
+  $: {
+    if ($isStreaming && !previousStreamingState) {
+      // Streaming just started - force scroll to bottom and reset user scroll state
+      userHasScrolled = false;
+      scrollToBottom(true);
+    }
+    previousStreamingState = $isStreaming;
+  }
+
+  const scrollToBottom = (force = false) => {
+    // Find the actual scrollable parent container
+    const scrollableParent = chatContainer?.closest('.overflow-y-auto') as HTMLElement;
+    if (scrollableParent && scrollableParent.scrollHeight && (!userHasScrolled || force)) {
+      isAutoScrolling = true;
+      scrollableParent.scrollTo({ top: scrollableParent.scrollHeight, behavior: 'smooth' });
+      // Reset the flag after scrolling
+      setTimeout(() => {
+        isAutoScrolling = false;
+      }, 100);
+    }
+  };
+
+  const handleScroll = () => {
+    // Find the actual scrollable parent container
+    const scrollableParent = chatContainer?.closest('.overflow-y-auto') as HTMLElement;
+    if (!scrollableParent || !scrollableParent.scrollHeight || isAutoScrolling) return;
+    
+    // Check if user is near the bottom (within 100px)
+    const isNearBottom = scrollableParent.scrollHeight - scrollableParent.scrollTop - scrollableParent.clientHeight < 100;
+    
+    // Only update userHasScrolled if this is a user-initiated scroll
+    userHasScrolled = !isNearBottom;
+  };
+
+  // Auto-scroll when new messages arrive or during streaming
+  afterUpdate(() => {
+    // Auto-scroll in two scenarios:
+    // 1. New messages arrived (message count increased)
+    // 2. Currently streaming (content is being updated)
+    const hasNewMessages = totalMessages > previousMessageCount;
+    
+    if (hasNewMessages || $isStreaming) {
+      // Only auto-scroll if user hasn't manually scrolled away from the bottom
+      if (!userHasScrolled) {
+        scrollToBottom();
+      }
+    }
+    
+    // Update previous message count
+    if (hasNewMessages) {
+      previousMessageCount = totalMessages;
+    }
+  });
+
+  onMount(() => {
+    previousMessageCount = totalMessages;
+    // Force scroll to bottom on initial mount
+    scrollToBottom(true);
+    
+    // Attach scroll listener to the actual scrollable parent
+    const scrollableParent = chatContainer?.closest('.overflow-y-auto') as HTMLElement;
+    if (scrollableParent) {
+      scrollableParent.addEventListener('scroll', handleScroll);
+      
+      // Cleanup on component destroy
+      return () => {
+        scrollableParent.removeEventListener('scroll', handleScroll);
+      };
+    }
+  });
 </script>
 
-<div class="max-w-4xl mx-auto px-4 py-6 space-y-6">
-  {#if messages.length === 0 && streamingArray.length === 0}
+<div bind:this={chatContainer} class="max-w-4xl mx-auto px-4 py-6 space-y-6 overflow-y-auto">
+  {#if messages.length === 0}
     <!-- Empty State -->
     <div class="text-center py-12">
       <svg class="w-12 h-12 mx-auto text-gray-400 dark:text-gray-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -26,13 +99,14 @@
     </div>
   {:else}
     <!-- Messages -->
-    {#each messages as message (message.id)}
-      <MessageBubble {message} />
+    {#each messages as message, index (message.id)}
+      <MessageBubble 
+        {message} 
+        isLastAssistantMessage={message.role === 'assistant' && index === messages.length - 1}
+        on:message 
+      />
     {/each}
 
-    <!-- Streaming Messages -->
-    {#each streamingArray as streaming (streaming.id)}
-      <StreamingMessage content={streaming.content} />
-    {/each}
+
   {/if}
 </div>

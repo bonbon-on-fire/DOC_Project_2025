@@ -5,6 +5,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: Date;
+  sequenceNumber: number;
 }
 
 export interface Chat {
@@ -17,6 +18,7 @@ export interface Chat {
 }
 
 export interface CreateChatRequest {
+  chatId?: string;
   userId: string;
   message: string;
   systemPrompt?: string;
@@ -66,4 +68,5 @@ export interface MessageDto {
   role: string;
   content: string;
   timestamp: Date;
+  sequenceNumber: number;
 }

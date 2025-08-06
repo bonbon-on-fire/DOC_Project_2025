@@ -53,8 +53,9 @@ public class AIChatDbContext : DbContext
                   .HasForeignKey(e => e.ChatId)
                   .OnDelete(DeleteBehavior.Cascade);
 
-            // Create index for better query performance
+            // Create indexes for better query performance
             entity.HasIndex(e => new { e.ChatId, e.Timestamp });
+            entity.HasIndex(e => new { e.ChatId, e.SequenceNumber }).IsUnique();
         });
 
         // Seed data (optional)

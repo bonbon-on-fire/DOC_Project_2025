@@ -1,21 +1,17 @@
 <script lang="ts">
-  import { chats, currentChatId, chatActions, isLoading, currentUser } from '$lib/stores/chat';
-  import { chatHub, chatHubConnectionStatus } from '$lib/signalr/chat-hub';
+  import { chats, currentChatId, chatActions, isLoading, currentUser, isStreaming } from '$lib/stores/chat';
+  import { formatTime } from '$lib/utils/time';
 
   let newChatMessage = '';
-  let isCreatingChat = false;
 
   async function createNewChat() {
-    if (!newChatMessage.trim() || isCreatingChat) return;
+    if (!newChatMessage.trim() || $isStreaming) return;
 
-    isCreatingChat = true;
     try {
-      await chatActions.createChat(newChatMessage.trim());
+      await chatActions.streamNewChat(newChatMessage.trim());
       newChatMessage = '';
     } catch (err) {
       console.error('Failed to create chat:', err);
-    } finally {
-      isCreatingChat = false;
     }
   }
 
@@ -37,7 +33,8 @@
     const diffInHours = (now.getTime() - chatDate.getTime()) / (1000 * 60 * 60);
 
     if (diffInHours < 24) {
-      return chatDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      // Use the new centralized function for correct local time display.
+      return formatTime(chatDate);
     } else if (diffInHours < 24 * 7) {
       return chatDate.toLocaleDateString([], { weekday: 'short' });
     } else {
@@ -55,12 +52,7 @@
       </div>
       <div>
         <p class="font-medium text-gray-900 dark:text-white">{$currentUser.name}</p>
-        <div class="flex items-center space-x-2">
-          <div class="w-2 h-2 bg-green-500 rounded-full"></div>
-          <span class="text-xs text-gray-500 dark:text-gray-400">
-            {$chatHubConnectionStatus === 'connected' ? 'Online' : 'Connecting...'}
-          </span>
-        </div>
+
       </div>
     </div>
 
@@ -74,16 +66,16 @@
                focus:ring-2 focus:ring-blue-500 focus:border-transparent
                resize-none"
         rows="2"
-        disabled={isCreatingChat}
+        disabled={$isStreaming}
       ></textarea>
       <button
         type="submit"
-        disabled={!newChatMessage.trim() || isCreatingChat}
+        disabled={!newChatMessage.trim() || $isStreaming}
         class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 
                text-white font-medium py-2 px-4 rounded-lg transition-colors
                disabled:cursor-not-allowed"
       >
-        {isCreatingChat ? 'Creating...' : 'New Chat'}
+        {$isStreaming ? 'Creating...' : 'New Chat'}
       </button>
     </form>
   </div>

@@ -1,4 +1,5 @@
 // API client for communicating with ASP.NET backend
+import { PUBLIC_API_BASE_URL } from '$env/static/public';
 import type { 
   ChatDto, 
   CreateChatRequest, 
@@ -8,7 +9,7 @@ import type {
 export class ApiClient {
   private baseUrl: string;
 
-  constructor(baseUrl: string = 'http://localhost:5130') {
+  constructor(baseUrl: string = PUBLIC_API_BASE_URL) {
     this.baseUrl = baseUrl;
   }
 
@@ -67,6 +68,32 @@ export class ApiClient {
     await this.request(`/api/chat/${chatId}`, {
       method: 'DELETE',
     });
+  }
+
+  async sendMessage(chatId: string, message: string): Promise<any> {
+    return this.request(`/api/chat/${chatId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  async streamChatCompletion(request: CreateChatRequest): Promise<Response> {
+    const url = `${this.baseUrl}/api/chat/stream-sse`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+    
+    return response;
   }
 
   // Health check

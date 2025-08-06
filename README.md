@@ -98,8 +98,10 @@ VITE_WS_BASE_URL=ws://localhost:5000
     "DefaultConnection": "Server=localhost;Database=AIChat;Trusted_Connection=true;"
   },
   "OpenAI": {
-    "ApiKey": "your-openai-api-key"
+    "ApiKey": "your-openai-api-key-here",
+    "Model": "gpt-3.5-turbo"
   },
+  "LlmApiKey": "your-llm-api-key-here",
   "Jwt": {
     "SecretKey": "your-jwt-secret",
     "Issuer": "AIChat",
@@ -107,6 +109,15 @@ VITE_WS_BASE_URL=ws://localhost:5000
   }
 }
 ```
+
+**Environment Variables:**
+
+For the LLM integration to work properly, you need to set the following environment variables:
+
+- `LLM_API_KEY` - Your API key for the LLM provider (e.g., OpenRouter)
+- `LLM_BASE_API_URL` - Base URL for the LLM provider (if different from default)
+
+You can set these in your system environment or in a `.env` file in the server directory.
 
 ## 📚 Documentation
 

@@ -2,11 +2,12 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using AIChat.Server.Data;
 using AIChat.Server.Models;
-using AIChat.Server.Services;
 using AchieveAi.LmDotnetTools.LmCore.Agents;
 using AchieveAi.LmDotnetTools.LmCore.Messages;
 using System.Runtime.CompilerServices;
 using System.Text;
+using Lib.AspNetCore.ServerSentEvents;
+using AIChat.Server.Services;
 
 namespace AIChat.Server.Controllers;
 
@@ -15,16 +16,23 @@ namespace AIChat.Server.Controllers;
 public class ChatController : ControllerBase
 {
     private readonly AIChatDbContext _dbContext;
-    private readonly IOpenAIService _openAIService;
     private readonly ILogger<ChatController> _logger;
-    private readonly IStreamingAgent? _streamingAgent;
+    private readonly IStreamingAgent _streamingAgent;
+    private readonly IServerSentEventsService _serverSentEventsService;
+    private readonly IMessageSequenceService _messageSequenceService;
 
-    public ChatController(AIChatDbContext dbContext, IOpenAIService openAIService, ILogger<ChatController> logger, IStreamingAgent? streamingAgent = null)
+    public ChatController(
+        AIChatDbContext dbContext, 
+        ILogger<ChatController> logger, 
+        IStreamingAgent streamingAgent, 
+        IServerSentEventsService serverSentEventsService,
+        IMessageSequenceService messageSequenceService)
     {
         _dbContext = dbContext;
-        _openAIService = openAIService;
         _logger = logger;
         _streamingAgent = streamingAgent;
+        _serverSentEventsService = serverSentEventsService;
+        _messageSequenceService = messageSequenceService;
     }
 
     // GET: api/chat/history?userId={userId}&page={page}&pageSize={pageSize}
@@ -42,7 +50,7 @@ public class ChatController : ControllerBase
 
             var chats = await _dbContext.Chats
                 .Where(c => c.UserId == userId)
-                .Include(c => c.Messages.OrderBy(m => m.Timestamp))
+                .Include(c => c.Messages.OrderBy(m => m.SequenceNumber))
                 .OrderByDescending(c => c.UpdatedAt)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
@@ -61,7 +69,8 @@ public class ChatController : ControllerBase
                         ChatId = m.ChatId,
                         Role = m.Role,
                         Content = m.Content,
-                        Timestamp = m.Timestamp
+                        Timestamp = m.Timestamp,
+                        SequenceNumber = m.SequenceNumber
                     }).ToList(),
                     CreatedAt = c.CreatedAt,
                     UpdatedAt = c.UpdatedAt
@@ -87,7 +96,7 @@ public class ChatController : ControllerBase
         try
         {
             var chat = await _dbContext.Chats
-                .Include(c => c.Messages.OrderBy(m => m.Timestamp))
+                .Include(c => c.Messages.OrderBy(m => m.SequenceNumber))
                 .FirstOrDefaultAsync(c => c.Id == id);
 
             if (chat == null)
@@ -106,7 +115,8 @@ public class ChatController : ControllerBase
                     ChatId = m.ChatId,
                     Role = m.Role,
                     Content = m.Content,
-                    Timestamp = m.Timestamp
+                    Timestamp = m.Timestamp,
+                    SequenceNumber = m.SequenceNumber
                 }).ToList(),
                 CreatedAt = chat.CreatedAt,
                 UpdatedAt = chat.UpdatedAt
@@ -180,7 +190,8 @@ public class ChatController : ControllerBase
                     var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
                     
                     // Generate response using IStreamingAgent (non-streaming)
-                    var messages = await _streamingAgent.GenerateReplyAsync(lmMessages);
+                    var options = new GenerateReplyOptions { ModelId = "moonshotai/kimi-k2" };
+                    var messages = await _streamingAgent.GenerateReplyAsync(lmMessages, options);
                     aiResponse = string.Join("", messages.OfType<TextMessage>().Select(m => m.Text));
                 }
                 catch (Exception ex)
@@ -199,8 +210,7 @@ public class ChatController : ControllerBase
                         .Where(m => m.ChatId == chat.Id)
                         .OrderBy(m => m.Timestamp)
                         .ToListAsync();
-
-                    aiResponse = await _openAIService.GenerateResponseAsync(conversationHistory);
+                    aiResponse = "Error: No AI service available.";
                 }
                 catch (Exception ex)
                 {
@@ -259,41 +269,101 @@ public class ChatController : ControllerBase
         }
     }
 
+    // POST: api/chat/{chatId}/messages
+    [HttpPost("{chatId}/messages")]
+    public async Task<ActionResult<MessageDto>> SendMessage(
+        string chatId,
+        [FromBody] SendMessageRequest request)
+    {
+        // This endpoint provides an HTTP alternative to SignalR for sending messages
+        // Implementation mirrors ChatHub.SendMessage but returns HTTP responses
+        // For real-time updates, clients should use SignalR
+        
+        // TODO: Get userId from authentication context
+        // var userId = "user123"; // Placeholder
+        
+        try
+        {
+            // Save user message to database
+            var userMessage = new Message
+            {
+                ChatId = chatId,
+                Role = "user",
+                Content = request.Message,
+                Timestamp = DateTime.UtcNow
+            };
+
+            _dbContext.Messages.Add(userMessage);
+            await _dbContext.SaveChangesAsync();
+
+            var messageDto = new MessageDto
+            {
+                Id = userMessage.Id,
+                ChatId = userMessage.ChatId,
+                Role = userMessage.Role,
+                Content = userMessage.Content,
+                Timestamp = userMessage.Timestamp
+            };
+
+            return Ok(messageDto);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending message to chat {ChatId}", chatId);
+            return StatusCode(500, new { Error = "Failed to send message" });
+        }
+    }
+
     // POST: api/chat/stream
     [HttpPost("stream")]
     public async IAsyncEnumerable<string> StreamChatCompletion(
         [FromBody] CreateChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // Validate streaming agent is available
         if (_streamingAgent == null)
         {
             _logger.LogWarning("Streaming agent not configured");
             yield return "Error: Streaming agent not configured";
             yield break;
         }
-
-        // Use a simple approach without try-catch around yield return
         await foreach (var content in StreamChatCompletionImpl(request, cancellationToken))
         {
             yield return content;
         }
     }
 
+    private async Task WriteSseEvent(object data)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(data);
+        await Response.WriteAsync($"data: {json}\n\n");
+        await Response.Body.FlushAsync();
+    }
+
     private async IAsyncEnumerable<string> StreamChatCompletionImpl(
         CreateChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // Create new chat
-        var chat = new Chat
+        Chat chat;
+        if (!string.IsNullOrEmpty(request.ChatId))
         {
-            UserId = request.UserId,
-            Title = GenerateChatTitle(request.Message),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _dbContext.Chats.Add(chat);
+            chat = await _dbContext.Chats.FirstOrDefaultAsync(c => c.Id == request.ChatId, cancellationToken);
+            if (chat == null)
+            {
+                yield return "Error: Chat not found";
+                yield break;
+            }
+        }
+        else
+        {
+            chat = new Chat
+            {
+                UserId = request.UserId,
+                Title = GenerateChatTitle(request.Message),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _dbContext.Chats.Add(chat);
+        }
 
         // Add initial user message
         var userMessage = new Message
@@ -331,8 +401,10 @@ public class ChatController : ControllerBase
         var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
 
         // Generate streaming response using IStreamingAgent
+        var options = new GenerateReplyOptions { ModelId = "moonshotai/kimi-k2" };
         var streamingResponse = await _streamingAgent!.GenerateReplyStreamingAsync(
             lmMessages,
+            options,
             cancellationToken: cancellationToken);
 
         // Buffer to accumulate partial responses for saving to database
@@ -424,6 +496,173 @@ public class ChatController : ControllerBase
         
         return title;
     }
+
+    // POST: api/chat/stream-sse
+    [HttpPost("stream-sse")]
+    public async Task StreamChatCompletionSse(
+        [FromBody] CreateChatRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        // Set response headers for SSE
+        Response.Headers.Append("Content-Type", "text/event-stream");
+        Response.Headers.Append("Cache-Control", "no-cache");
+        Response.Headers.Append("Connection", "keep-alive");
+
+        Chat chat;
+        if (!string.IsNullOrEmpty(request.ChatId))
+        {
+            chat = await _dbContext.Chats.FirstOrDefaultAsync(c => c.Id == request.ChatId, cancellationToken);
+            if (chat == null)
+            {
+                var errorEvent = new { type = "error", message = "Chat not found" };
+                await SendSseEvent("error", errorEvent);
+                return;
+            }
+        }
+        else
+        {
+            chat = new Chat
+            {
+                UserId = request.UserId,
+                Title = GenerateChatTitle(request.Message),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _dbContext.Chats.Add(chat);
+            await _dbContext.SaveChangesAsync();
+        }
+
+        // Get sequence number for user message
+        var userSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chat.Id);
+        
+        // Add initial user message
+        var userMessage = new Message
+        {
+            ChatId = chat.Id,
+            Role = "user",
+            Content = request.Message,
+            Timestamp = DateTime.UtcNow,
+            SequenceNumber = userSequenceNumber
+        };
+
+        _dbContext.Messages.Add(userMessage);
+
+        // Add system prompt if provided
+        if (!string.IsNullOrEmpty(request.SystemPrompt))
+        {
+            var systemSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chat.Id);
+            var systemMessage = new Message
+            {
+                ChatId = chat.Id,
+                Role = "system",
+                Content = request.SystemPrompt,
+                Timestamp = DateTime.UtcNow.AddMilliseconds(-1), // Ensure system message comes first
+                SequenceNumber = systemSequenceNumber
+            };
+
+            _dbContext.Messages.Add(systemMessage);
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        // Get sequence number for assistant message
+        var assistantSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chat.Id);
+        
+        // Create assistant message placeholder
+        var assistantMessage = new Message
+        {
+            ChatId = chat.Id,
+            Role = "assistant",
+            Content = "",
+            Timestamp = DateTime.UtcNow,
+            SequenceNumber = assistantSequenceNumber
+        };
+
+        _dbContext.Messages.Add(assistantMessage);
+        await _dbContext.SaveChangesAsync();
+
+        // Send initial event with chat and message IDs and timestamps
+        var initEvent = new { 
+            type = "init", 
+            chatId = chat.Id, 
+            messageId = assistantMessage.Id,
+            userMessageId = userMessage.Id,
+            userTimestamp = userMessage.Timestamp,
+            assistantTimestamp = assistantMessage.Timestamp,
+            userSequenceNumber = userMessage.SequenceNumber,
+            assistantSequenceNumber = assistantMessage.SequenceNumber
+        };
+        await SendSseEvent("init", initEvent);
+
+        // Stream the response
+        try
+        {
+            // Get conversation history for context
+            var conversationHistory = await _dbContext.Messages
+                .Where(m => m.ChatId == chat.Id)
+                .OrderBy(m => m.SequenceNumber)
+                .ToListAsync(cancellationToken);
+
+            var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
+            
+            // Generate response using IStreamingAgent (streaming)
+            var options = new GenerateReplyOptions { ModelId = "moonshotai/kimi-k2" };
+            
+            var fullResponse = "";
+            var responseStream = await _streamingAgent.GenerateReplyStreamingAsync(
+                lmMessages,
+                new GenerateReplyOptions
+                {
+                    ModelId = "moonshotai/kimi-k2"
+                },
+                cancellationToken);
+
+            await foreach (var message in responseStream.WithCancellation(cancellationToken))
+            {
+                if (message is TextUpdateMessage textMessage)
+                {
+                    var chunkEvent = new { type = "chunk", delta = textMessage.Text, done = false };
+                    await SendSseEvent("chunk", chunkEvent);
+                    fullResponse += textMessage.Text;
+                }
+            }
+
+            // Update the assistant message with the full response
+            assistantMessage.Content = fullResponse;
+            await _dbContext.SaveChangesAsync();
+
+            // Send completion event
+            var completeEvent = new { type = "complete", content = fullResponse, done = true };
+            await SendSseEvent("complete", completeEvent);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error streaming chat completion for chat {ChatId}", chat.Id);
+            var errorEvent = new { type = "error", message = ex.Message };
+            await SendSseEvent("error", errorEvent);
+        }
+    }
+
+    private async Task SendSseEvent(string eventType, object data)
+    {
+        // For now, we'll send to all connected clients
+        // In a real implementation, you'd want to send to specific clients
+        var clients = _serverSentEventsService.GetClients();
+        if (clients.Any())
+        {
+            var client = clients.First();
+            var json = System.Text.Json.JsonSerializer.Serialize(data);
+            await client.SendEventAsync(new ServerSentEvent { Type = eventType, Data = new List<string> { json } });
+        }
+        else
+        {
+            // Fallback to manual SSE if no clients connected
+            var json = System.Text.Json.JsonSerializer.Serialize(data);
+            await Response.WriteAsync($"event: {eventType}\n");
+            await Response.WriteAsync($"data: {json}\n\n");
+            await Response.Body.FlushAsync();
+        }
+    }
 }
 
 // DTOs for API responses
@@ -444,13 +683,14 @@ public class MessageDto
     public string Role { get; set; } = string.Empty;
     public string Content { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; }
+    public int SequenceNumber { get; set; }
 }
 
-public class CreateChatRequest
+public record CreateChatRequest(string? ChatId, string UserId, string Message, string? SystemPrompt);
+
+public class SendMessageRequest
 {
-    public string UserId { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
-    public string? SystemPrompt { get; set; }
 }
 
 public class ChatHistoryResponse

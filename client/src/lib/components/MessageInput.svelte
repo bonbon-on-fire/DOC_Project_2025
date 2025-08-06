@@ -28,8 +28,8 @@
 
   function autoResize() {
     if (textareaElement) {
-      textareaElement.style.height = 'auto';
-      textareaElement.style.height = Math.min(textareaElement.scrollHeight, 120) + 'px';
+      textareaElement.style.height = 'auto'; // Reset height
+      textareaElement.style.height = `${textareaElement.scrollHeight}px`;
     }
   }
 
@@ -55,9 +55,9 @@
                  bg-white dark:bg-gray-700 text-gray-900 dark:text-white
                  focus:ring-2 focus:ring-blue-500 focus:border-transparent
                  disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed
-                 resize-none overflow-y-auto max-h-30"
+                 resize-none overflow-y-auto"
           rows="1"
-          style="min-height: 44px;"
+          style="min-height: 44px; max-height: 6rem;"
         ></textarea>
 
         <!-- Character count (optional) -->

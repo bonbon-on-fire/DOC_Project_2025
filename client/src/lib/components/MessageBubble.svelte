@@ -1,14 +1,10 @@
 <script lang="ts">
   import type { MessageDto } from '$lib/types/chat';
+  import { formatTime } from '$lib/utils/time';
+  import { currentStreamingMessage, isStreaming } from '$lib/stores/chat';
 
   export let message: MessageDto;
-
-  function formatTime(timestamp: Date): string {
-    return new Date(timestamp).toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-  }
+  export let isLastAssistantMessage = false;
 
   function formatContent(content: string): string {
     // Basic markdown-like formatting
@@ -54,10 +50,15 @@
         {/if}
 
         <!-- Message text with basic formatting -->
-        <div class="prose prose-sm max-w-none 
+        <div class="prose prose-sm max-w-none dark:prose-invert
                     {message.role === 'user' ? 'prose-invert' : ''}
-                    {message.role === 'system' ? 'text-yellow-800 dark:text-yellow-200' : ''}">
-          {@html formatContent(message.content)}
+                    {message.role === 'system' ? 'text-yellow-800 dark:text-yellow-200' : 'dark:text-gray-300'}">
+          {#if isLastAssistantMessage && $isStreaming && message.role === 'assistant'}
+            {@html formatContent($currentStreamingMessage)}
+            <span class="animate-pulse">▋</span>
+          {:else}
+            {@html formatContent(message.content)}
+          {/if}
         </div>
       </div>
 

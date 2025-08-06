@@ -180,3 +180,5 @@ msbuild.wrn
 .vercel
 server/aichat_dev.db-wal
 server/aichat_dev.db-shm
+
+.fake

@@ -3,7 +3,6 @@
   import ChatSidebar from './ChatSidebar.svelte';
   import ChatWindow from './ChatWindow.svelte';
   import { chatActions, error } from '$lib/stores/chat';
-  import { chatHub } from '$lib/signalr/chat-hub';
 
   let isInitialized = false;
 

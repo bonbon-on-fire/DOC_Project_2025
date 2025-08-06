@@ -1,30 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { currentChat, currentChatMessages, chatActions } from '$lib/stores/chat';
-  import { chatHub, chatHubConnectionStatus, chatHubStreamingMessages } from '$lib/signalr/chat-hub';
+  import { currentChat, currentChatId, currentChatMessages, chatActions, isStreaming } from '$lib/stores/chat';
   import MessageList from './MessageList.svelte';
   import MessageInput from './MessageInput.svelte';
 
   let messagesContainer: HTMLElement;
   let isSending = false;
 
-  // Auto-scroll to bottom when new messages arrive
-  $: if ($currentChatMessages && messagesContainer) {
-    setTimeout(() => {
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }, 50);
-  }
+  async function handleSend(event: CustomEvent<{ message: string }>) {
+    if ($isStreaming) return;
 
-  async function sendMessage(message: string) {
-    if (isSending || !message.trim()) return;
-
-    isSending = true;
-    try {
-      await chatActions.sendMessage(message.trim());
-    } catch (err) {
-      console.error('Failed to send message:', err);
-    } finally {
-      isSending = false;
+    if ($currentChatId) {
+      await chatActions.streamReply(event.detail.message);
+    } else {
+      await chatActions.streamNewChat(event.detail.message);
     }
   }
 </script>
@@ -45,9 +34,9 @@
           Select a conversation from the sidebar or start a new chat to begin.
         </p>
         <div class="space-y-2 text-sm text-gray-500 dark:text-gray-400">
-          <p>✨ Real-time AI conversations</p>
-          <p>🔄 Streaming responses</p>
-          <p>💾 Chat history saved</p>
+          <p> Real-time AI conversations</p>
+          <p> Streaming responses</p>
+          <p> Chat history saved</p>
         </div>
       </div>
     </div>
@@ -66,13 +55,7 @@
         <div class="flex items-center space-x-2">
           <!-- Connection Status -->
           <div class="flex items-center space-x-2">
-            <div class="w-2 h-2 rounded-full 
-                       {$chatHubConnectionStatus === 'connected' ? 'bg-green-500' : 
-                        $chatHubConnectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-red-500'}">
-            </div>
-            <span class="text-xs text-gray-500 dark:text-gray-400 capitalize">
-              {$chatHubConnectionStatus}
-            </span>
+            <!-- Removed SignalR connection status -->
           </div>
         </div>
       </div>
@@ -83,20 +66,15 @@
       bind:this={messagesContainer}
       class="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900"
     >
-      <MessageList 
-        messages={$currentChatMessages} 
-        streamingMessages={$chatHubStreamingMessages}
-      />
+      <MessageList messages={$currentChatMessages} />
     </div>
 
     <!-- Message Input -->
     <div class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
       <MessageInput 
-        on:send={(e) => sendMessage(e.detail.message)}
-        disabled={isSending || $chatHubConnectionStatus !== 'connected'}
-        placeholder={isSending ? 'Sending...' : 
-                    $chatHubConnectionStatus !== 'connected' ? 'Connecting...' : 
-                    'Type your message...'}
+        on:send={handleSend}
+        disabled={$isStreaming}
+        placeholder={$isStreaming ? 'AI is thinking...' : 'Type your message...'}
       />
     </div>
   {/if}

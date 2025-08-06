@@ -3,20 +3,29 @@ using AIChat.Server.Services;
 using AIChat.Server.Data;
 using AIChat.Server.Models;
 using Microsoft.EntityFrameworkCore;
+using AchieveAi.LmDotnetTools.LmCore.Agents;
+using AchieveAi.LmDotnetTools.LmCore.Messages;
+using System.Collections.Immutable;
 
 namespace AIChat.Server.Hubs;
 
 public class ChatHub : Hub
 {
-    private readonly IOpenAIService _openAIService;
+    private readonly IStreamingAgent _streamingAgent;
     private readonly AIChatDbContext _dbContext;
     private readonly ILogger<ChatHub> _logger;
+    private readonly IMessageSequenceService _messageSequenceService;
 
-    public ChatHub(IOpenAIService openAIService, AIChatDbContext dbContext, ILogger<ChatHub> logger)
+    public ChatHub(
+        IStreamingAgent streamingAgent,
+        AIChatDbContext dbContext,
+        ILogger<ChatHub> logger,
+        IMessageSequenceService messageSequenceService)
     {
-        _openAIService = openAIService;
+        _streamingAgent = streamingAgent;
         _dbContext = dbContext;
         _logger = logger;
+        _messageSequenceService = messageSequenceService;
     }
 
     public async Task JoinChatGroup(string chatId)
@@ -35,13 +44,17 @@ public class ChatHub : Hub
     {
         try
         {
+            // Get next sequence number for user message
+            var userSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chatId);
+            
             // Save user message to database
             var userMessage = new Message
             {
                 ChatId = chatId,
                 Role = "user",
                 Content = message,
-                Timestamp = DateTime.UtcNow
+                Timestamp = DateTime.UtcNow,
+                SequenceNumber = userSequenceNumber
             };
 
             _dbContext.Messages.Add(userMessage);
@@ -54,22 +67,41 @@ public class ChatHub : Hub
                 ChatId = chatId,
                 Role = "user",
                 Content = message,
-                Timestamp = userMessage.Timestamp
+                Timestamp = userMessage.Timestamp,
+                SequenceNumber = userMessage.SequenceNumber
             });
 
             // Get conversation history for AI context
             var conversationHistory = await _dbContext.Messages
                 .Where(m => m.ChatId == chatId)
-                .OrderBy(m => m.Timestamp)
+                .OrderBy(m => m.SequenceNumber)
                 .ToListAsync();
 
+            // Convert conversation history to IMessage format
+            var lmMessages = conversationHistory.Select(m => new TextMessage
+            {
+                Text = m.Content,
+                Role = m.Role.ToLower() switch
+                {
+                    "user" => Role.User,
+                    "assistant" => Role.Assistant,
+                    "system" => Role.System,
+                    _ => Role.User
+                },
+                Metadata = ImmutableDictionary<string, object>.Empty
+            }).ToList();
+
+            // Get next sequence number for assistant message
+            var assistantSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chatId);
+            
             // Create assistant message placeholder
             var assistantMessage = new Message
             {
                 ChatId = chatId,
                 Role = "assistant",
                 Content = "", // Will be filled as we stream
-                Timestamp = DateTime.UtcNow
+                Timestamp = DateTime.UtcNow,
+                SequenceNumber = assistantSequenceNumber
             };
 
             _dbContext.Messages.Add(assistantMessage);
@@ -81,23 +113,34 @@ public class ChatHub : Hub
                 Id = assistantMessage.Id,
                 ChatId = chatId,
                 Role = "assistant",
-                Timestamp = assistantMessage.Timestamp
+                Timestamp = assistantMessage.Timestamp,
+                SequenceNumber = assistantMessage.SequenceNumber
             });
 
             // Stream AI response
             var fullResponse = "";
-            await foreach (var chunk in _openAIService.GenerateStreamingResponseAsync(conversationHistory))
-            {
-                fullResponse += chunk;
-                
-                // Send chunk to clients
-                await Clients.Group($"chat_{chatId}").SendAsync("ReceiveStreamChunk", new
+            var responseStream = await _streamingAgent.GenerateReplyStreamingAsync(
+                lmMessages,
+                new GenerateReplyOptions
                 {
-                    MessageId = assistantMessage.Id,
-                    ChatId = chatId,
-                    Delta = chunk,
-                    Done = false
+                    ModelId = "moonshotai/kimi-k2"
                 });
+
+            await foreach (var chunk in responseStream)
+            {
+                if (chunk is TextUpdateMessage textChunk)
+                {
+                    fullResponse += textChunk.Text;
+                    
+                    // Send chunk to clients
+                    await Clients.Group($"chat_{chatId}").SendAsync("ReceiveStreamChunk", new
+                    {
+                        MessageId = assistantMessage.Id,
+                        ChatId = chatId,
+                        Delta = textChunk.Text,
+                        Done = false
+                    });
+                }
             }
 
             // Update the assistant message with full content
