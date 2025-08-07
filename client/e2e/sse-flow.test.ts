@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 
 test('SSE flow sends fully decorated init event and handles streaming correctly', async ({ page }) => {
   // Navigate to the app
-  await page.goto('http://localhost:5175/');
+  await page.goto('http://localhost:5173/');
   
   // Wait for the page to load
   await page.waitForLoadState('networkidle');
@@ -62,7 +62,7 @@ test('SSE flow handles error conditions gracefully', async ({ page }) => {
   // For now, we'll just verify the basic error handling structure exists
   
   // Navigate to the app
-  await page.goto('http://localhost:5175/');
+  await page.goto('http://localhost:5173/');
   
   // Wait for the page to load
   await page.waitForLoadState('networkidle');

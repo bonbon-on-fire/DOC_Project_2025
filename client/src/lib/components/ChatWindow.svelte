@@ -1,14 +1,146 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, afterUpdate } from 'svelte';
   import { currentChat, currentChatId, currentChatMessages, chatActions, isStreaming } from '$lib/stores/chat';
   import MessageList from './MessageList.svelte';
   import MessageInput from './MessageInput.svelte';
 
   let messagesContainer: HTMLElement;
   let isSending = false;
+  let userHasScrolled = false;
+  let previousMessageCount = 0;
+  let isAutoScrolling = false;
+  let previousStreamingState = false;
+
+  // Track total message count for detecting new messages
+  $: totalMessages = $currentChatMessages.length;
+  
+  // Watch for messages array changes to trigger scroll
+  $: if ($currentChatMessages && $currentChatMessages.length > 0) {
+    // Trigger scroll when messages are loaded/updated with multiple attempts
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        if (!userHasScrolled) {
+          scrollToBottom(true);
+        }
+      }, 100);
+      
+      setTimeout(() => {
+        if (!userHasScrolled) {
+          scrollToBottom(true);
+        }
+      }, 300);
+      
+      setTimeout(() => {
+        if (!userHasScrolled) {
+          scrollToBottom(true);
+        }
+      }, 500);
+    });
+  }
+  
+  // Watch for streaming state changes
+  $: {
+    if ($isStreaming && !previousStreamingState) {
+      // Streaming just started - force scroll to bottom and reset user scroll state
+      userHasScrolled = false;
+      setTimeout(() => scrollToBottom(true), 100);
+    }
+    previousStreamingState = $isStreaming;
+  }
+
+  // Watch for conversation changes to reset scroll
+  $: if ($currentChatId) {
+    userHasScrolled = false;
+    previousMessageCount = 0;
+    // Force scroll after conversation loads with multiple attempts
+    setTimeout(() => scrollToBottom(true), 200);
+    setTimeout(() => scrollToBottom(true), 500);
+    setTimeout(() => scrollToBottom(true), 1000);
+  }
+
+  const scrollToBottom = (force = false) => {
+    if (messagesContainer && messagesContainer.scrollHeight && (!userHasScrolled || force)) {
+      isAutoScrolling = true;
+      
+      // Use requestAnimationFrame to ensure DOM is updated, then scroll
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          messagesContainer.scrollTo({ top: messagesContainer.scrollHeight, behavior: 'smooth' });
+        });
+      });
+      
+      // Reset the flag after scrolling
+      setTimeout(() => {
+        isAutoScrolling = false;
+      }, 300);
+    }
+  };
+
+  const handleScroll = () => {
+    if (!messagesContainer || !messagesContainer.scrollHeight || isAutoScrolling) return;
+    
+    // Check if user is near the bottom (within 100px)
+    const isNearBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 100;
+    
+    // Only update userHasScrolled if this is a user-initiated scroll
+    userHasScrolled = !isNearBottom;
+  };
+
+  // Auto-scroll when new messages arrive or during streaming
+  afterUpdate(() => {
+    // Auto-scroll in two scenarios:
+    // 1. New messages arrived (message count increased)
+    // 2. Currently streaming (content is being updated)
+    const hasNewMessages = totalMessages > previousMessageCount;
+    
+    if (hasNewMessages || $isStreaming) {
+      // Only auto-scroll if user hasn't manually scrolled away from the bottom
+      if (!userHasScrolled) {
+        // Use multiple attempts to ensure scroll works
+        setTimeout(() => scrollToBottom(), 50);
+        setTimeout(() => scrollToBottom(), 200);
+        setTimeout(() => scrollToBottom(), 400);
+      }
+    }
+    
+    // If this is initial load (no previous messages), force scroll
+    if (totalMessages > 0 && previousMessageCount === 0) {
+      setTimeout(() => scrollToBottom(true), 300);
+      setTimeout(() => scrollToBottom(true), 600);
+    }
+    
+    // Update previous message count
+    if (hasNewMessages) {
+      previousMessageCount = totalMessages;
+    }
+  });
+
+  onMount(() => {
+    previousMessageCount = totalMessages;
+    
+    // Attach scroll listener to the messages container
+    if (messagesContainer) {
+      messagesContainer.addEventListener('scroll', handleScroll);
+      
+      // Force scroll to bottom after DOM is fully rendered
+      requestAnimationFrame(() => {
+        setTimeout(() => scrollToBottom(true), 100);
+        setTimeout(() => scrollToBottom(true), 300);
+        setTimeout(() => scrollToBottom(true), 500);
+      });
+      
+      // Cleanup on component destroy
+      return () => {
+        messagesContainer.removeEventListener('scroll', handleScroll);
+      };
+    }
+  });
 
   async function handleSend(event: CustomEvent<{ message: string }>) {
     if ($isStreaming) return;
+
+    // Reset user scroll state when sending a new message
+    userHasScrolled = false;
 
     if ($currentChatId) {
       await chatActions.streamReply(event.detail.message);
