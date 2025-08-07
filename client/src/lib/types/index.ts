@@ -1,0 +1,30 @@
+/**
+ * Re-exports all core TypeScript interfaces for the Rich Message Rendering system.
+ * This barrel file provides a convenient single import point for all interface types.
+ */
+
+// Core renderer interfaces
+export type { MessageRenderer, CustomRenderer } from './renderer.js';
+
+// Streaming interfaces  
+export type { StreamingHandler, StreamingUpdate } from './streaming.js';
+
+// Expandable behavior interfaces
+export type { ExpandableComponent } from './expandable.js';
+
+// Message state interfaces
+export type { MessageState, MessageStates } from '../stores/messageState.js';
+
+// Re-export existing chat types for convenience
+export type { 
+  Message, 
+  Chat, 
+  MessageDto, 
+  RichMessageDto,
+  ChatDto,
+  CreateChatRequest,
+  ContinueChatRequest,
+  ChatResponse,
+  StreamChatResponse,
+  ChatHistoryResponse
+} from './chat.js';

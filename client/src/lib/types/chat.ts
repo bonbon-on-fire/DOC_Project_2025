@@ -70,3 +70,15 @@ export interface MessageDto {
   timestamp: Date;
   sequenceNumber: number;
 }
+
+/**
+ * Extended MessageDto interface for Rich Message Rendering support.
+ * Adds messageType field for renderer routing and future extensibility.
+ */
+export interface RichMessageDto extends MessageDto {
+  /**
+   * The type of message content for renderer routing.
+   * Determines which renderer component will handle this message.
+   */
+  messageType?: 'text' | 'reasoning' | 'tool_call' | 'tool_result' | 'usage' | string;
+}

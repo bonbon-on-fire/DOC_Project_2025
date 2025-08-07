@@ -1,10 +1,15 @@
 <script lang="ts">
-  import type { MessageDto } from '$lib/types/chat';
+  import type { RichMessageDto } from '$lib/types/chat';
   import { formatTime } from '$lib/utils/time';
   import { currentStreamingMessage, isStreaming } from '$lib/stores/chat';
 
-  export let message: MessageDto;
+  export let message: RichMessageDto;
   export let isLastAssistantMessage = false;
+  
+  // Additional props for compatibility with MessageRouter
+  export let expanded: boolean = true;
+  export let renderPhase: string = 'complete';
+  export let isLatest: boolean = false;
 
   function formatContent(content: string): string {
     // Basic markdown-like formatting

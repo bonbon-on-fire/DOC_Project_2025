@@ -12,8 +12,9 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
-		"test:unit": "vitest",
-		"test": "npm run test:unit -- --run && npm run test:e2e",
+		"test:unit": "vitest --watch=false",
+		"test:unit:watch": "vitest",
+		"test": "npm run test:unit && npm run test:e2e",
 		"test:e2e": "playwright test",
 		"db:push": "drizzle-kit push",
 		"db:generate": "drizzle-kit generate",
@@ -30,6 +31,8 @@
 		"@tailwindcss/forms": "^0.5.9",
 		"@tailwindcss/typography": "^0.5.15",
 		"@tailwindcss/vite": "^4.0.0",
+		"@types/dompurify": "^3.0.5",
+		"@testing-library/svelte": "^5.1.0",
 		"@types/better-sqlite3": "^7.6.12",
 		"@types/node": "^22.17.0",
 		"@vitest/browser": "^3.2.3",
@@ -50,7 +53,8 @@
 		"vite": "^7.0.4",
 		"vite-plugin-devtools-json": "^0.2.0",
 		"vitest": "^3.2.3",
-		"vitest-browser-svelte": "^0.1.0"
+		"vitest-browser-svelte": "^0.1.0",
+		"jsdom": "^24.1.0"
 	},
 	"dependencies": {
 		"@microsoft/signalr": "^9.0.6",
@@ -58,6 +62,8 @@
 		"@oslojs/crypto": "^1.0.1",
 		"@oslojs/encoding": "^1.1.0",
 		"better-sqlite3": "^11.8.0",
-		"drizzle-orm": "^0.40.0"
+		"drizzle-orm": "^0.40.0",
+		"dompurify": "^3.1.6",
+		"marked": "^15.0.12"
 	}
 }
