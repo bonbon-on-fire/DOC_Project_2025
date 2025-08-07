@@ -8,6 +8,8 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using Lib.AspNetCore.ServerSentEvents;
 using AIChat.Server.Services;
+using ChatDto = AIChat.Server.Services.ChatDto;
+using MessageDto = AIChat.Server.Services.MessageDto;
 
 namespace AIChat.Server.Controllers;
 
@@ -15,24 +17,18 @@ namespace AIChat.Server.Controllers;
 [Route("api/[controller]")]
 public class ChatController : ControllerBase
 {
-    private readonly AIChatDbContext _dbContext;
+    private readonly IChatService _chatService;
     private readonly ILogger<ChatController> _logger;
-    private readonly IStreamingAgent _streamingAgent;
     private readonly IServerSentEventsService _serverSentEventsService;
-    private readonly IMessageSequenceService _messageSequenceService;
 
     public ChatController(
-        AIChatDbContext dbContext, 
+        IChatService chatService,
         ILogger<ChatController> logger, 
-        IStreamingAgent streamingAgent, 
-        IServerSentEventsService serverSentEventsService,
-        IMessageSequenceService messageSequenceService)
+        IServerSentEventsService serverSentEventsService)
     {
-        _dbContext = dbContext;
+        _chatService = chatService;
         _logger = logger;
-        _streamingAgent = streamingAgent;
         _serverSentEventsService = serverSentEventsService;
-        _messageSequenceService = messageSequenceService;
     }
 
     // GET: api/chat/history?userId={userId}&page={page}&pageSize={pageSize}
@@ -42,231 +38,65 @@ public class ChatController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20)
     {
-        try
+        var result = await _chatService.GetChatHistoryAsync(userId, page, pageSize);
+        
+        if (!result.Success)
         {
-            var totalCount = await _dbContext.Chats
-                .Where(c => c.UserId == userId)
-                .CountAsync();
-
-            var chats = await _dbContext.Chats
-                .Where(c => c.UserId == userId)
-                .Include(c => c.Messages.OrderBy(m => m.SequenceNumber))
-                .OrderByDescending(c => c.UpdatedAt)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
-
-            var response = new ChatHistoryResponse
-            {
-                Chats = chats.Select(c => new ChatDto
-                {
-                    Id = c.Id,
-                    UserId = c.UserId,
-                    Title = c.Title,
-                    Messages = c.Messages.Select(m => new MessageDto
-                    {
-                        Id = m.Id,
-                        ChatId = m.ChatId,
-                        Role = m.Role,
-                        Content = m.Content,
-                        Timestamp = m.Timestamp,
-                        SequenceNumber = m.SequenceNumber
-                    }).ToList(),
-                    CreatedAt = c.CreatedAt,
-                    UpdatedAt = c.UpdatedAt
-                }).ToList(),
-                TotalCount = totalCount,
-                Page = page,
-                PageSize = pageSize
-            };
-
-            return Ok(response);
+            _logger.LogError("Error retrieving chat history for user {UserId}: {Error}", userId, result.Error);
+            return StatusCode(500, new { Error = result.Error ?? "Failed to retrieve chat history" });
         }
-        catch (Exception ex)
+
+        var response = new ChatHistoryResponse
         {
-            _logger.LogError(ex, "Error retrieving chat history for user {UserId}", userId);
-            return StatusCode(500, new { Error = "Failed to retrieve chat history" });
-        }
+            Chats = result.Chats,
+            TotalCount = result.TotalCount,
+            Page = result.Page,
+            PageSize = result.PageSize
+        };
+
+        return Ok(response);
     }
 
     // GET: api/chat/{id}
     [HttpGet("{id}")]
     public async Task<ActionResult<ChatDto>> GetChat(string id)
     {
-        try
+        var result = await _chatService.GetChatAsync(id);
+        
+        if (!result.Success)
         {
-            var chat = await _dbContext.Chats
-                .Include(c => c.Messages.OrderBy(m => m.SequenceNumber))
-                .FirstOrDefaultAsync(c => c.Id == id);
-
-            if (chat == null)
+            if (result.Error == "Chat not found")
             {
                 return NotFound(new { Error = "Chat not found" });
             }
-
-            var chatDto = new ChatDto
-            {
-                Id = chat.Id,
-                UserId = chat.UserId,
-                Title = chat.Title,
-                Messages = chat.Messages.Select(m => new MessageDto
-                {
-                    Id = m.Id,
-                    ChatId = m.ChatId,
-                    Role = m.Role,
-                    Content = m.Content,
-                    Timestamp = m.Timestamp,
-                    SequenceNumber = m.SequenceNumber
-                }).ToList(),
-                CreatedAt = chat.CreatedAt,
-                UpdatedAt = chat.UpdatedAt
-            };
-
-            return Ok(chatDto);
+            
+            _logger.LogError("Error retrieving chat {ChatId}: {Error}", id, result.Error);
+            return StatusCode(500, new { Error = result.Error ?? "Failed to retrieve chat" });
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving chat {ChatId}", id);
-            return StatusCode(500, new { Error = "Failed to retrieve chat" });
-        }
+
+        return Ok(result.Chat);
     }
 
     // POST: api/chat
     [HttpPost]
     public async Task<ActionResult<ChatDto>> CreateChat([FromBody] CreateChatRequest request)
     {
-        try
+        var createRequest = new Services.CreateChatRequest
         {
-            // Create new chat
-            var chat = new Chat
-            {
-                UserId = request.UserId,
-                Title = GenerateChatTitle(request.Message),
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            _dbContext.Chats.Add(chat);
-
-            // Add initial user message
-            var userMessage = new Message
-            {
-                ChatId = chat.Id,
-                Role = "user",
-                Content = request.Message,
-                Timestamp = DateTime.UtcNow
-            };
-
-            _dbContext.Messages.Add(userMessage);
-
-            // Add system prompt if provided
-            if (!string.IsNullOrEmpty(request.SystemPrompt))
-            {
-                var systemMessage = new Message
-                {
-                    ChatId = chat.Id,
-                    Role = "system",
-                    Content = request.SystemPrompt,
-                    Timestamp = DateTime.UtcNow.AddMilliseconds(-1) // Ensure system message comes first
-                };
-
-                _dbContext.Messages.Add(systemMessage);
-            }
-
-            await _dbContext.SaveChangesAsync();
-
-            string aiResponse;
-            if (_streamingAgent != null)
-            {
-                // Use IStreamingAgent for AI response
-                try
-                {
-                    // Get conversation history for context
-                    var conversationHistory = await _dbContext.Messages
-                        .Where(m => m.ChatId == chat.Id)
-                        .OrderBy(m => m.Timestamp)
-                        .ToListAsync();
-
-                    var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
-                    
-                    // Generate response using IStreamingAgent (non-streaming)
-                    var options = new GenerateReplyOptions { ModelId = "moonshotai/kimi-k2" };
-                    var messages = await _streamingAgent.GenerateReplyAsync(lmMessages, options);
-                    aiResponse = string.Join("", messages.OfType<TextMessage>().Select(m => m.Text));
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error generating AI response with IStreamingAgent");
-                    aiResponse = $"Error: Failed to generate AI response. {ex.Message}";
-                }
-            }
-            else
-            {
-                // Fallback to existing OpenAIService
-                try
-                {
-                    // Get conversation history for context
-                    var conversationHistory = await _dbContext.Messages
-                        .Where(m => m.ChatId == chat.Id)
-                        .OrderBy(m => m.Timestamp)
-                        .ToListAsync();
-                    aiResponse = "Error: No AI service available.";
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error generating AI response with OpenAIService");
-                    aiResponse = $"Error: Failed to generate AI response. {ex.Message}";
-                }
-            }
-            
-            var assistantMessage = new Message
-            {
-                ChatId = chat.Id,
-                Role = "assistant",
-                Content = aiResponse,
-                Timestamp = DateTime.UtcNow
-            };
-
-            _dbContext.Messages.Add(assistantMessage);
-            chat.UpdatedAt = DateTime.UtcNow;
-            await _dbContext.SaveChangesAsync();
-
-            // Return complete chat
-            var chatDto = new ChatDto
-            {
-                Id = chat.Id,
-                UserId = chat.UserId,
-                Title = chat.Title,
-                Messages = new List<MessageDto>
-                {
-                    new()
-                    {
-                        Id = userMessage.Id,
-                        ChatId = chat.Id,
-                        Role = "user",
-                        Content = request.Message,
-                        Timestamp = userMessage.Timestamp
-                    },
-                    new()
-                    {
-                        Id = assistantMessage.Id,
-                        ChatId = chat.Id,
-                        Role = "assistant",
-                        Content = aiResponse,
-                        Timestamp = assistantMessage.Timestamp
-                    }
-                },
-                CreatedAt = chat.CreatedAt,
-                UpdatedAt = chat.UpdatedAt
-            };
-
-            return CreatedAtAction(nameof(GetChat), new { id = chat.Id }, chatDto);
-        }
-        catch (Exception ex)
+            UserId = request.UserId,
+            Message = request.Message,
+            SystemPrompt = request.SystemPrompt
+        };
+        
+        var result = await _chatService.CreateChatAsync(createRequest);
+        
+        if (!result.Success)
         {
-            _logger.LogError(ex, "Error creating chat");
-            return StatusCode(500, new { Error = "Failed to create chat" });
+            _logger.LogError("Error creating chat: {Error}", result.Error);
+            return StatusCode(500, new { Error = result.Error ?? "Failed to create chat" });
         }
+
+        return CreatedAtAction(nameof(GetChat), new { id = result.Chat!.Id }, result.Chat);
     }
 
     // POST: api/chat/{chatId}/messages
@@ -280,56 +110,24 @@ public class ChatController : ControllerBase
         // For real-time updates, clients should use SignalR
         
         // TODO: Get userId from authentication context
-        // var userId = "user123"; // Placeholder
+        var userId = "user123"; // Placeholder
         
-        try
+        var sendRequest = new Services.SendMessageRequest
         {
-            // Save user message to database
-            var userMessage = new Message
-            {
-                ChatId = chatId,
-                Role = "user",
-                Content = request.Message,
-                Timestamp = DateTime.UtcNow
-            };
-
-            _dbContext.Messages.Add(userMessage);
-            await _dbContext.SaveChangesAsync();
-
-            var messageDto = new MessageDto
-            {
-                Id = userMessage.Id,
-                ChatId = userMessage.ChatId,
-                Role = userMessage.Role,
-                Content = userMessage.Content,
-                Timestamp = userMessage.Timestamp
-            };
-
-            return Ok(messageDto);
-        }
-        catch (Exception ex)
+            ChatId = chatId,
+            UserId = userId,
+            Message = request.Message
+        };
+        
+        var result = await _chatService.SendMessageAsync(sendRequest);
+        
+        if (!result.Success)
         {
-            _logger.LogError(ex, "Error sending message to chat {ChatId}", chatId);
-            return StatusCode(500, new { Error = "Failed to send message" });
+            _logger.LogError("Error sending message to chat {ChatId}: {Error}", chatId, result.Error);
+            return StatusCode(500, new { Error = result.Error ?? "Failed to send message" });
         }
-    }
 
-    // POST: api/chat/stream
-    [HttpPost("stream")]
-    public async IAsyncEnumerable<string> StreamChatCompletion(
-        [FromBody] CreateChatRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        if (_streamingAgent == null)
-        {
-            _logger.LogWarning("Streaming agent not configured");
-            yield return "Error: Streaming agent not configured";
-            yield break;
-        }
-        await foreach (var content in StreamChatCompletionImpl(request, cancellationToken))
-        {
-            yield return content;
-        }
+        return Ok(result.UserMessage);
     }
 
     private async Task WriteSseEvent(object data)
@@ -339,152 +137,18 @@ public class ChatController : ControllerBase
         await Response.Body.FlushAsync();
     }
 
-    private async IAsyncEnumerable<string> StreamChatCompletionImpl(
-        CreateChatRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        Chat chat;
-        if (!string.IsNullOrEmpty(request.ChatId))
-        {
-            chat = await _dbContext.Chats.FirstOrDefaultAsync(c => c.Id == request.ChatId, cancellationToken);
-            if (chat == null)
-            {
-                yield return "Error: Chat not found";
-                yield break;
-            }
-        }
-        else
-        {
-            chat = new Chat
-            {
-                UserId = request.UserId,
-                Title = GenerateChatTitle(request.Message),
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            _dbContext.Chats.Add(chat);
-        }
-
-        // Add initial user message
-        var userMessage = new Message
-        {
-            ChatId = chat.Id,
-            Role = "user",
-            Content = request.Message,
-            Timestamp = DateTime.UtcNow
-        };
-
-        _dbContext.Messages.Add(userMessage);
-
-        // Add system prompt if provided
-        if (!string.IsNullOrEmpty(request.SystemPrompt))
-        {
-            var systemMessage = new Message
-            {
-                ChatId = chat.Id,
-                Role = "system",
-                Content = request.SystemPrompt,
-                Timestamp = DateTime.UtcNow.AddMilliseconds(-1) // Ensure system message comes first
-            };
-
-            _dbContext.Messages.Add(systemMessage);
-        }
-
-        await _dbContext.SaveChangesAsync();
-
-        // Convert project messages to LmDotnetTools messages
-        var conversationHistory = await _dbContext.Messages
-            .Where(m => m.ChatId == chat.Id)
-            .OrderBy(m => m.Timestamp)
-            .ToListAsync(cancellationToken);
-
-        var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
-
-        // Generate streaming response using IStreamingAgent
-        var options = new GenerateReplyOptions { ModelId = "moonshotai/kimi-k2" };
-        var streamingResponse = await _streamingAgent!.GenerateReplyStreamingAsync(
-            lmMessages,
-            options,
-            cancellationToken: cancellationToken);
-
-        // Buffer to accumulate partial responses for saving to database
-        var responseBuffer = new StringBuilder();
-        var assistantMessage = new Message
-        {
-            ChatId = chat.Id,
-            Role = "assistant",
-            Content = "",
-            Timestamp = DateTime.UtcNow
-        };
-
-        await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
-        {
-            if (message is TextMessage textMessage)
-            {
-                var content = textMessage.Text;
-                if (!string.IsNullOrEmpty(content))
-                {
-                    // Yield the content for streaming to client
-                    yield return content;
-                    
-                    // Accumulate content for saving
-                    responseBuffer.Append(content);
-                }
-            }
-        }
-
-        // Save the complete assistant response
-        assistantMessage.Content = responseBuffer.ToString();
-        _dbContext.Messages.Add(assistantMessage);
-        chat.UpdatedAt = DateTime.UtcNow;
-        await _dbContext.SaveChangesAsync();
-    }
-
-    // Helper method to convert project Message to LmDotnetTools IMessage
-    private static IMessage ConvertToLmMessage(Message message)
-    {
-        var role = message.Role.ToLowerInvariant() switch
-        {
-            "user" => Role.User,
-            "assistant" => Role.Assistant,
-            "system" => Role.System,
-            _ => Role.User
-        };
-
-        return new TextMessage
-        {
-            Role = role,
-            Text = message.Content,
-            FromAgent = null,
-            GenerationId = null,
-            Metadata = null,
-            IsThinking = false
-        };
-    }
-
     // DELETE: api/chat/{id}
     [HttpDelete("{id}")]
     public async Task<ActionResult> DeleteChat(string id)
     {
-        try
+        var success = await _chatService.DeleteChatAsync(id);
+        
+        if (!success)
         {
-            var chat = await _dbContext.Chats.FindAsync(id);
-            
-            if (chat == null)
-            {
-                return NotFound(new { Error = "Chat not found" });
-            }
-
-            _dbContext.Chats.Remove(chat);
-            await _dbContext.SaveChangesAsync();
-
-            return NoContent();
+            return NotFound(new { Error = "Chat not found" });
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting chat {ChatId}", id);
-            return StatusCode(500, new { Error = "Failed to delete chat" });
-        }
+
+        return NoContent();
     }
 
     private static string GenerateChatTitle(string firstMessage)
@@ -508,136 +172,47 @@ public class ChatController : ControllerBase
         Response.Headers.Append("Cache-Control", "no-cache");
         Response.Headers.Append("Connection", "keep-alive");
 
-        Chat chat;
-        if (!string.IsNullOrEmpty(request.ChatId))
-        {
-            chat = await _dbContext.Chats.FirstOrDefaultAsync(c => c.Id == request.ChatId, cancellationToken);
-            if (chat == null)
-            {
-                var errorEvent = new { type = "error", message = "Chat not found" };
-                await SendSseEvent("error", errorEvent);
-                return;
-            }
-        }
-        else
-        {
-            chat = new Chat
-            {
-                UserId = request.UserId,
-                Title = GenerateChatTitle(request.Message),
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            _dbContext.Chats.Add(chat);
-            await _dbContext.SaveChangesAsync();
-        }
-
-        // Get sequence number for user message
-        var userSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chat.Id);
-        
-        // Add initial user message
-        var userMessage = new Message
-        {
-            ChatId = chat.Id,
-            Role = "user",
-            Content = request.Message,
-            Timestamp = DateTime.UtcNow,
-            SequenceNumber = userSequenceNumber
-        };
-
-        _dbContext.Messages.Add(userMessage);
-
-        // Add system prompt if provided
-        if (!string.IsNullOrEmpty(request.SystemPrompt))
-        {
-            var systemSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chat.Id);
-            var systemMessage = new Message
-            {
-                ChatId = chat.Id,
-                Role = "system",
-                Content = request.SystemPrompt,
-                Timestamp = DateTime.UtcNow.AddMilliseconds(-1), // Ensure system message comes first
-                SequenceNumber = systemSequenceNumber
-            };
-
-            _dbContext.Messages.Add(systemMessage);
-        }
-
-        await _dbContext.SaveChangesAsync();
-
-        // Get sequence number for assistant message
-        var assistantSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chat.Id);
-        
-        // Create assistant message placeholder
-        var assistantMessage = new Message
-        {
-            ChatId = chat.Id,
-            Role = "assistant",
-            Content = "",
-            Timestamp = DateTime.UtcNow,
-            SequenceNumber = assistantSequenceNumber
-        };
-
-        _dbContext.Messages.Add(assistantMessage);
-        await _dbContext.SaveChangesAsync();
-
-        // Send initial event with chat and message IDs and timestamps
-        var initEvent = new { 
-            type = "init", 
-            chatId = chat.Id, 
-            messageId = assistantMessage.Id,
-            userMessageId = userMessage.Id,
-            userTimestamp = userMessage.Timestamp,
-            assistantTimestamp = assistantMessage.Timestamp,
-            userSequenceNumber = userMessage.SequenceNumber,
-            assistantSequenceNumber = assistantMessage.SequenceNumber
-        };
-        await SendSseEvent("init", initEvent);
-
-        // Stream the response
         try
         {
-            // Get conversation history for context
-            var conversationHistory = await _dbContext.Messages
-                .Where(m => m.ChatId == chat.Id)
-                .OrderBy(m => m.SequenceNumber)
-                .ToListAsync(cancellationToken);
-
-            var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
-            
-            // Generate response using IStreamingAgent (streaming)
-            var options = new GenerateReplyOptions { ModelId = "moonshotai/kimi-k2" };
-            
-            var fullResponse = "";
-            var responseStream = await _streamingAgent.GenerateReplyStreamingAsync(
-                lmMessages,
-                new GenerateReplyOptions
-                {
-                    ModelId = "moonshotai/kimi-k2"
-                },
-                cancellationToken);
-
-            await foreach (var message in responseStream.WithCancellation(cancellationToken))
+            var streamRequest = new Services.StreamChatRequest
             {
-                if (message is TextUpdateMessage textMessage)
-                {
-                    var chunkEvent = new { type = "chunk", delta = textMessage.Text, done = false };
-                    await SendSseEvent("chunk", chunkEvent);
-                    fullResponse += textMessage.Text;
-                }
+                UserId = request.UserId,
+                Message = request.Message,
+                SystemPrompt = request.SystemPrompt
+            };
+
+            // Prepare chat and get initialization metadata
+            var initResult = await _chatService.PrepareStreamChatAsync(streamRequest);
+
+            // Send fully decorated initial event
+            var initEvent = new 
+            { 
+                type = "init",
+                chatId = initResult.ChatId,
+                userMessageId = initResult.UserMessageId,
+                messageId = initResult.AssistantMessageId,  // For backward compatibility
+                assistantMessageId = initResult.AssistantMessageId,
+                userTimestamp = initResult.UserTimestamp,
+                assistantTimestamp = initResult.AssistantTimestamp,
+                userSequenceNumber = initResult.UserSequenceNumber,
+                assistantSequenceNumber = initResult.AssistantSequenceNumber
+            };
+            await SendSseEvent("init", initEvent);
+
+            // Stream the response using ChatService
+            await foreach (var chunk in _chatService.StreamChatCompletionAsync(streamRequest, cancellationToken))
+            {
+                var chunkEvent = new { type = "chunk", delta = chunk, done = false };
+                await SendSseEvent("chunk", chunkEvent);
             }
 
-            // Update the assistant message with the full response
-            assistantMessage.Content = fullResponse;
-            await _dbContext.SaveChangesAsync();
-
-            // Send completion event
-            var completeEvent = new { type = "complete", content = fullResponse, done = true };
+            // Send completion event with final content
+            var completeEvent = new { type = "complete", done = true };
             await SendSseEvent("complete", completeEvent);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error streaming chat completion for chat {ChatId}", chat.Id);
+            _logger.LogError(ex, "Error streaming chat completion");
             var errorEvent = new { type = "error", message = ex.Message };
             await SendSseEvent("error", errorEvent);
         }
@@ -665,27 +240,7 @@ public class ChatController : ControllerBase
     }
 }
 
-// DTOs for API responses
-public class ChatDto
-{
-    public string Id { get; set; } = string.Empty;
-    public string UserId { get; set; } = string.Empty;
-    public string Title { get; set; } = string.Empty;
-    public List<MessageDto> Messages { get; set; } = new();
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
-}
-
-public class MessageDto
-{
-    public string Id { get; set; } = string.Empty;
-    public string ChatId { get; set; } = string.Empty;
-    public string Role { get; set; } = string.Empty;
-    public string Content { get; set; } = string.Empty;
-    public DateTime Timestamp { get; set; }
-    public int SequenceNumber { get; set; }
-}
-
+// Request DTOs for API endpoints
 public record CreateChatRequest(string? ChatId, string UserId, string Message, string? SystemPrompt);
 
 public class SendMessageRequest
@@ -695,7 +250,7 @@ public class SendMessageRequest
 
 public class ChatHistoryResponse
 {
-    public List<ChatDto> Chats { get; set; } = new();
+    public List<Services.ChatDto> Chats { get; set; } = new();
     public int TotalCount { get; set; }
     public int Page { get; set; }
     public int PageSize { get; set; }

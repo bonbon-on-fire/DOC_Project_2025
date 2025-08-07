@@ -11,21 +11,20 @@ namespace AIChat.Server.Hubs;
 
 public class ChatHub : Hub
 {
-    private readonly IStreamingAgent _streamingAgent;
-    private readonly AIChatDbContext _dbContext;
+    private readonly IChatService _chatService;
     private readonly ILogger<ChatHub> _logger;
-    private readonly IMessageSequenceService _messageSequenceService;
 
     public ChatHub(
-        IStreamingAgent streamingAgent,
-        AIChatDbContext dbContext,
-        ILogger<ChatHub> logger,
-        IMessageSequenceService messageSequenceService)
+        IChatService chatService,
+        ILogger<ChatHub> logger)
     {
-        _streamingAgent = streamingAgent;
-        _dbContext = dbContext;
+        _chatService = chatService;
         _logger = logger;
-        _messageSequenceService = messageSequenceService;
+        
+        // Subscribe to ChatService events for real-time broadcasting
+        _chatService.MessageCreated += OnMessageCreated;
+        _chatService.StreamChunkReceived += OnStreamChunkReceived;
+        _chatService.StreamCompleted += OnStreamCompleted;
     }
 
     public async Task JoinChatGroup(string chatId)
@@ -44,127 +43,30 @@ public class ChatHub : Hub
     {
         try
         {
-            // Get next sequence number for user message
-            var userSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chatId);
-            
-            // Save user message to database
-            var userMessage = new Message
+            var sendRequest = new SendMessageRequest
             {
                 ChatId = chatId,
-                Role = "user",
-                Content = message,
-                Timestamp = DateTime.UtcNow,
-                SequenceNumber = userSequenceNumber
+                UserId = userId,
+                Message = message
             };
-
-            _dbContext.Messages.Add(userMessage);
-            await _dbContext.SaveChangesAsync();
-
-            // Broadcast user message to chat group
-            await Clients.Group($"chat_{chatId}").SendAsync("ReceiveMessage", new
-            {
-                Id = userMessage.Id,
-                ChatId = chatId,
-                Role = "user",
-                Content = message,
-                Timestamp = userMessage.Timestamp,
-                SequenceNumber = userMessage.SequenceNumber
-            });
-
-            // Get conversation history for AI context
-            var conversationHistory = await _dbContext.Messages
-                .Where(m => m.ChatId == chatId)
-                .OrderBy(m => m.SequenceNumber)
-                .ToListAsync();
-
-            // Convert conversation history to IMessage format
-            var lmMessages = conversationHistory.Select(m => new TextMessage
-            {
-                Text = m.Content,
-                Role = m.Role.ToLower() switch
-                {
-                    "user" => Role.User,
-                    "assistant" => Role.Assistant,
-                    "system" => Role.System,
-                    _ => Role.User
-                },
-                Metadata = ImmutableDictionary<string, object>.Empty
-            }).ToList();
-
-            // Get next sequence number for assistant message
-            var assistantSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chatId);
             
-            // Create assistant message placeholder
-            var assistantMessage = new Message
+            var result = await _chatService.SendMessageAsync(sendRequest);
+            
+            if (!result.Success)
             {
-                ChatId = chatId,
-                Role = "assistant",
-                Content = "", // Will be filled as we stream
-                Timestamp = DateTime.UtcNow,
-                SequenceNumber = assistantSequenceNumber
-            };
-
-            _dbContext.Messages.Add(assistantMessage);
-            await _dbContext.SaveChangesAsync();
-
-            // Notify clients that AI is starting to respond
-            await Clients.Group($"chat_{chatId}").SendAsync("AIResponseStarted", new
-            {
-                Id = assistantMessage.Id,
-                ChatId = chatId,
-                Role = "assistant",
-                Timestamp = assistantMessage.Timestamp,
-                SequenceNumber = assistantMessage.SequenceNumber
-            });
-
-            // Stream AI response
-            var fullResponse = "";
-            var responseStream = await _streamingAgent.GenerateReplyStreamingAsync(
-                lmMessages,
-                new GenerateReplyOptions
+                _logger.LogError("Error sending message for chat {ChatId}: {Error}", chatId, result.Error);
+                
+                await Clients.Group($"chat_{chatId}").SendAsync("ReceiveError", new
                 {
-                    ModelId = "moonshotai/kimi-k2"
+                    ChatId = chatId,
+                    Error = result.Error ?? "Failed to process message. Please try again.",
+                    Timestamp = DateTime.UtcNow
                 });
-
-            await foreach (var chunk in responseStream)
-            {
-                if (chunk is TextUpdateMessage textChunk)
-                {
-                    fullResponse += textChunk.Text;
-                    
-                    // Send chunk to clients
-                    await Clients.Group($"chat_{chatId}").SendAsync("ReceiveStreamChunk", new
-                    {
-                        MessageId = assistantMessage.Id,
-                        ChatId = chatId,
-                        Delta = textChunk.Text,
-                        Done = false
-                    });
-                }
+                return;
             }
 
-            // Update the assistant message with full content
-            assistantMessage.Content = fullResponse;
-            _dbContext.Messages.Update(assistantMessage);
-            await _dbContext.SaveChangesAsync();
-
-            // Notify clients that streaming is complete
-            await Clients.Group($"chat_{chatId}").SendAsync("ReceiveStreamChunk", new
-            {
-                MessageId = assistantMessage.Id,
-                ChatId = chatId,
-                Delta = "",
-                Done = true
-            });
-
-            // Update chat's UpdatedAt timestamp
-            var chat = await _dbContext.Chats.FindAsync(chatId);
-            if (chat != null)
-            {
-                chat.UpdatedAt = DateTime.UtcNow;
-                _dbContext.Chats.Update(chat);
-                await _dbContext.SaveChangesAsync();
-            }
+            // Note: Real-time broadcasting is handled by ChatService events
+            // The OnMessageCreated event handler will broadcast messages to SignalR clients
         }
         catch (Exception ex)
         {
@@ -179,6 +81,42 @@ public class ChatHub : Hub
         }
     }
 
+    // Event handlers for real-time broadcasting
+    private async Task OnMessageCreated(MessageCreatedEvent messageEvent)
+    {
+        await Clients.Group($"chat_{messageEvent.ChatId}").SendAsync("ReceiveMessage", new
+        {
+            Id = messageEvent.Message.Id,
+            ChatId = messageEvent.Message.ChatId,
+            Role = messageEvent.Message.Role,
+            Content = messageEvent.Message.Content,
+            Timestamp = messageEvent.Message.Timestamp,
+            SequenceNumber = messageEvent.Message.SequenceNumber
+        });
+    }
+
+    private async Task OnStreamChunkReceived(StreamChunkEvent chunkEvent)
+    {
+        await Clients.Group($"chat_{chunkEvent.ChatId}").SendAsync("ReceiveStreamChunk", new
+        {
+            MessageId = chunkEvent.MessageId,
+            ChatId = chunkEvent.ChatId,
+            Delta = chunkEvent.Delta,
+            Done = chunkEvent.Done
+        });
+    }
+
+    private async Task OnStreamCompleted(StreamCompleteEvent completeEvent)
+    {
+        await Clients.Group($"chat_{completeEvent.ChatId}").SendAsync("ReceiveStreamChunk", new
+        {
+            MessageId = completeEvent.MessageId,
+            ChatId = completeEvent.ChatId,
+            Delta = "",
+            Done = true
+        });
+    }
+
     public override async Task OnConnectedAsync()
     {
         _logger.LogInformation("Client {ConnectionId} connected to ChatHub", Context.ConnectionId);
@@ -189,5 +127,10 @@ public class ChatHub : Hub
     {
         _logger.LogInformation("Client {ConnectionId} disconnected from ChatHub", Context.ConnectionId);
         await base.OnDisconnectedAsync(exception);
+        
+        // Unsubscribe from events when client disconnects
+        _chatService.MessageCreated -= OnMessageCreated;
+        _chatService.StreamChunkReceived -= OnStreamChunkReceived;
+        _chatService.StreamCompleted -= OnStreamCompleted;
     }
 }

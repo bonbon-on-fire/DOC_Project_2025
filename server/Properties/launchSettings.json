@@ -3,11 +3,7 @@
     "http": {
       "commandName": "Project",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "OPENROUTER_API_BASE_URL": "https://openrouter.ai/api/v1/",
-        "OPENROUTER_API_KEY": "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",
-        "LLM_API_KEY": "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",
-        "LLM_BASE_API_URL": "https://openrouter.ai/api/v1/"
+        "ASPNETCORE_ENVIRONMENT": "Development"
       },
       "dotnetRunMessages": true,
       "applicationUrl": "http://localhost:5130"

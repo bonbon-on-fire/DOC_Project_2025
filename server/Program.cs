@@ -5,6 +5,9 @@ using AIChat.Server.Hubs;
 using AchieveAi.LmDotnetTools.LmConfig.Services;
 using AchieveAi.LmDotnetTools.LmCore.Agents;
 using AchieveAi.LmDotnetTools.OpenAIProvider.Agents;
+using AchieveAi.LmDotnetTools.Misc.Storage;
+using AchieveAi.LmDotnetTools.Misc.Configuration;
+using AchieveAi.LmDotnetTools.Misc.Http;
 using Lib.AspNetCore.ServerSentEvents;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -34,13 +37,56 @@ builder.Services.AddLmConfig(builder.Configuration.GetSection("LmConfig"));
 builder.Services.AddTransient<IStreamingAgent>(
     provider => {
     // Register IStreamingAgent as an OpenAIProvider-based agent with caching
-    // Get environment variables
-    var apiKey = Environment.GetEnvironmentVariable("LLM_API_KEY") ?? "";
-    var baseUrl = Environment.GetEnvironmentVariable("LLM_BASE_API_URL") ?? "https://api.openai.com/v1";
+    // Get configuration - prioritize environment variables, then User Secrets/config
+    var configuration = provider.GetRequiredService<IConfiguration>();
+    var logger = provider.GetRequiredService<ILogger<Program>>();
+    
+    var apiKey = Environment.GetEnvironmentVariable("LLM_API_KEY") 
+                 // ?? configuration["OpenAI:ApiKey"] 
+                 ?? "";
+    var baseUrl = Environment.GetEnvironmentVariable("LLM_BASE_API_URL") 
+                  // ?? configuration["OpenAI:BaseUrl"] 
+                  ?? "https://api.openai.com/v1";
 
-    // Create an OpenAI client
-    var openClient = new OpenClient(apiKey, baseUrl);
-    return new OpenClientAgent("OpenAi", openClient);
+    // Diagnostic logging for API configuration
+    logger.LogInformation("[DIAGNOSTIC] API Configuration:");
+    logger.LogInformation("[DIAGNOSTIC] Base URL: {BaseUrl}", baseUrl);
+    logger.LogInformation("[DIAGNOSTIC] API Key Length: {ApiKeyLength}", apiKey?.Length ?? 0);
+    logger.LogInformation("[DIAGNOSTIC] API Key Prefix: {ApiKeyPrefix}", apiKey?.Length > 10 ? apiKey.Substring(0, 10) + "..." : "[EMPTY]");
+
+    // Create an OpenAI client with caching
+    if (string.IsNullOrEmpty(apiKey))
+    {
+        throw new InvalidOperationException("OpenAI API key is required but was not provided.");
+    }
+    
+    // Create cache infrastructure
+    var cacheDirectory = configuration["LlmCache:CacheDirectory"] ?? "./llm-cache";
+    var cache = new AchieveAi.LmDotnetTools.Misc.Storage.FileKvStore(cacheDirectory);
+    
+    // Configure cache options
+    var cacheOptions = new AchieveAi.LmDotnetTools.Misc.Configuration.LlmCacheOptions
+    {
+        EnableCaching = configuration.GetValue<bool>("LlmCache:EnableCaching", true),
+        CacheExpiration = configuration.GetValue<TimeSpan?>("LlmCache:CacheExpiration", TimeSpan.FromHours(24)),
+        MaxCacheItems = configuration.GetValue<int?>("LlmCache:MaxCacheItems", 10000)
+    };
+    
+    // Create HTTP client with caching handler
+    var httpClientHandler = new HttpClientHandler();
+    var cachingHandler = new AchieveAi.LmDotnetTools.Misc.Http.CachingHttpMessageHandler(cache, cacheOptions, httpClientHandler, logger);
+    
+    var httpClient = new HttpClient(cachingHandler)
+    {
+        BaseAddress = new Uri(baseUrl),
+        Timeout = TimeSpan.FromMinutes(5)
+    };
+    
+    // Add authentication headers
+    httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+    
+    var openClient = new AchieveAi.LmDotnetTools.OpenAIProvider.Agents.OpenClient(httpClient, baseUrl, null, logger);
+    return new AchieveAi.LmDotnetTools.OpenAIProvider.Agents.OpenClientAgent("OpenAi", openClient);
 });
 
 // Add CORS for development
@@ -48,7 +94,20 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowSvelteApp", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://localhost:4173", "http://localhost:5174")
+        policy.WithOrigins(
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:5175",
+            "http://localhost:5176",
+            "http://localhost:5177",
+            "http://localhost:5178",
+            "http://localhost:5179",
+            "http://localhost:5180",
+            "http://localhost:5182",
+            "http://localhost:5183",
+            "http://localhost:5183",
+            "http://localhost:4173",
+            "http://localhost:5174")
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
@@ -66,6 +125,9 @@ builder.Services.AddScoped<SseService>();
 
 // Add message sequence service
 builder.Services.AddScoped<IMessageSequenceService, MessageSequenceService>();
+
+// Add chat service
+builder.Services.AddScoped<IChatService, ChatService>();
 
 var app = builder.Build();
 

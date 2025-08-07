@@ -166,42 +166,42 @@ export const chatActions = {
                 // Handle different event types
                 switch (data.type) {
                   case 'init':
-                  // Initialize new chat and store assistant message ID
-                  assistantMessageId = data.messageId;
-                  
-                  // Add user message with correct server timestamp
-                  const userMessage: MessageDto = {
-                    id: data.userMessageId,
-                    chatId: data.chatId,
-                    role: 'user',
-                    content: message,
-                    timestamp: new Date(data.userTimestamp),
-                    sequenceNumber: data.userSequenceNumber || 0
-                  };
-                  
-                  // Add assistant placeholder for streaming
-                  const assistantPlaceholder: MessageDto = {
-                    id: assistantMessageId,
-                    chatId: data.chatId,
-                    role: 'assistant',
-                    content: '',
-                    timestamp: new Date(data.assistantTimestamp),
-                    sequenceNumber: data.assistantSequenceNumber || 1
-                  };
-                  
-                  const newChat: ChatDto = {
-                    id: data.chatId,
-                    userId: user.id,
-                    title: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
-                    messages: [userMessage, assistantPlaceholder],
-                    createdAt: new Date(data.userTimestamp),
-                    updatedAt: new Date(data.assistantTimestamp)
-                  };
-                  
-                  chats.update(chats => [newChat, ...chats]);
-                  currentChatId.set(data.chatId);
-                  currentChat.set(newChat);
-                  break;
+                    // Initialize new chat and store assistant message ID
+                    assistantMessageId = data.messageId;
+                    
+                    // Add user message with correct server timestamp
+                    const userMessage: MessageDto = {
+                        id: data.userMessageId,
+                        chatId: data.chatId,
+                        role: 'user',
+                        content: message,
+                        timestamp: new Date(data.userTimestamp),
+                        sequenceNumber: data.userSequenceNumber || 0
+                    };
+                    
+                    // Add assistant placeholder for streaming
+                    const assistantPlaceholder: MessageDto = {
+                        id: assistantMessageId,
+                        chatId: data.chatId,
+                        role: 'assistant',
+                        content: '',
+                        timestamp: new Date(data.assistantTimestamp),
+                        sequenceNumber: data.assistantSequenceNumber || 1
+                    };
+                    
+                    const newChat: ChatDto = {
+                        id: data.chatId,
+                        userId: user.id,
+                        title: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
+                        messages: [userMessage, assistantPlaceholder],
+                        createdAt: new Date(data.userTimestamp),
+                        updatedAt: new Date(data.assistantTimestamp)
+                    };
+                    
+                    chats.update(chats => [newChat, ...chats]);
+                    currentChatId.set(data.chatId);
+                    currentChat.set(newChat);
+                    break;
                     
                   case 'chunk':
                     // Add chunk to current message
@@ -211,32 +211,42 @@ export const chatActions = {
                     break;
                     
                   case 'complete':
-                  // Finalize message
-                  const chatId = get(currentChatId);
-                  if (chatId && data.content && assistantMessageId) {
-                    // Update the assistant placeholder message with the final content
-                    currentChat.update(chat => {
-                      if (!chat) return null;
-                      const updatedMessages = chat.messages.map(msg =>
-                        msg.id === assistantMessageId ? { ...msg, content: data.content } : msg
-                      );
-                      return { ...chat, messages: updatedMessages, updatedAt: new Date() };
-                    });
-                    chats.update(chatList =>
-                      chatList.map(chat => {
-                        if (chat.id !== chatId) return chat;
-                        const updatedMessages = chat.messages.map(msg =>
-                          msg.id === assistantMessageId ? { ...msg, content: data.content } : msg
-                        );
-                        return { ...chat, messages: updatedMessages, updatedAt: new Date() };
-                      })
-                    );
-                    currentStreamingMessage.set('');
-                  }
-                  break;
-                    
+                    // Finalize message
+                    const chatId = get(currentChatId);
+                    if (chatId && assistantMessageId) {
+                        // Get the accumulated content from the streaming message
+                        const finalContent = get(currentStreamingMessage);
+                        
+                        // Update the assistant placeholder message with the final content
+                        currentChat.update(chat => {
+                            if (!chat) return null;
+                            const updatedMessages = chat.messages.map(msg =>
+                                msg.id === assistantMessageId ? { ...msg, content: finalContent } : msg
+                            );
+                            return { ...chat, messages: updatedMessages, updatedAt: new Date() };
+                        });
+                        chats.update(chatList =>
+                            chatList.map(chat => {
+                                if (chat.id !== chatId) return chat;
+                                const updatedMessages = chat.messages.map(msg =>
+                                msg.id === assistantMessageId ? { ...msg, content: finalContent } : msg
+                                );
+                                return { ...chat, messages: updatedMessages, updatedAt: new Date() };
+                            }));
+                        currentStreamingMessage.set('');
+                    }
+
+                    // Stream is complete, exit the reading loop
+                    reader.releaseLock();
+                    isStreaming.set(false);
+                    return;
+                        
                   case 'error':
                     error.set(data.message || 'Streaming error occurred');
+                    // Stream encountered an error, exit the reading loop
+                    reader.releaseLock();
+                    isStreaming.set(false);
+                    return;
                     break;
                 }
               } catch (parseError) {
@@ -250,10 +260,10 @@ export const chatActions = {
         isStreaming.set(false);
       }
     } catch (err) {
-      error.set(err instanceof Error ? err.message : 'Failed to stream chat completion');
-      console.error('Failed to stream chat completion:', err);
-      isStreaming.set(false);
-      throw err;
+        error.set(err instanceof Error ? err.message : 'Failed to stream chat completion');
+        console.error('Failed to stream chat completion:', err);
+        isStreaming.set(false);
+        throw err;
     }
   },
 
