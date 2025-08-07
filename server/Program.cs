@@ -42,10 +42,10 @@ builder.Services.AddTransient<IStreamingAgent>(
     var logger = provider.GetRequiredService<ILogger<Program>>();
     
     var apiKey = Environment.GetEnvironmentVariable("LLM_API_KEY") 
-                 // ?? configuration["OpenAI:ApiKey"] 
+                 ?? configuration["OpenAI:ApiKey"] 
                  ?? "";
     var baseUrl = Environment.GetEnvironmentVariable("LLM_BASE_API_URL") 
-                  // ?? configuration["OpenAI:BaseUrl"] 
+                  ?? configuration["OpenAI:BaseUrl"] 
                   ?? "https://api.openai.com/v1";
 
     // Diagnostic logging for API configuration

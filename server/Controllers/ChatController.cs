@@ -174,15 +174,17 @@ public class ChatController : ControllerBase
 
         try
         {
+            // Use unified service method for both new and existing chats
             var streamRequest = new Services.StreamChatRequest
             {
+                ChatId = request.ChatId, // null for new chats, populated for existing
                 UserId = request.UserId,
                 Message = request.Message,
                 SystemPrompt = request.SystemPrompt
             };
 
-            // Prepare chat and get initialization metadata
-            var initResult = await _chatService.PrepareStreamChatAsync(streamRequest);
+            // Get initialization metadata from service
+            var initResult = await _chatService.PrepareUnifiedStreamChatAsync(streamRequest);
 
             // Send fully decorated initial event
             var initEvent = new 
@@ -199,15 +201,18 @@ public class ChatController : ControllerBase
             };
             await SendSseEvent("init", initEvent);
 
-            // Stream the response using ChatService
-            await foreach (var chunk in _chatService.StreamChatCompletionAsync(streamRequest, cancellationToken))
+            // Stream the assistant response using unified service method
+            await foreach (var chunk in _chatService.StreamUnifiedChatCompletionAsync(streamRequest, cancellationToken))
             {
                 var chunkEvent = new { type = "chunk", delta = chunk, done = false };
                 await SendSseEvent("chunk", chunkEvent);
             }
 
+            // Get final content of assistant message for complete event
+            var finalContent = await _chatService.GetMessageContentAsync(initResult.AssistantMessageId);
+            
             // Send completion event with final content
-            var completeEvent = new { type = "complete", done = true };
+            var completeEvent = new { type = "complete", done = true, content = finalContent };
             await SendSseEvent("complete", completeEvent);
         }
         catch (Exception ex)

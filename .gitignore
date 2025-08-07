@@ -182,3 +182,5 @@ server/aichat_dev.db-wal
 server/aichat_dev.db-shm
 
 .fake
+launchsettings.json
+server/llm-cache/*.json

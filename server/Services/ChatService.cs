@@ -525,6 +525,256 @@ public class ChatService : IChatService
         }
     }
 
+    public async IAsyncEnumerable<string> StreamAssistantResponseAsync(
+        string chatId,
+        string assistantMessageId,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        // Retrieve the chat and assistant message from database
+        var chat = await _dbContext.Chats.FindAsync(chatId);
+        if (chat == null)
+        {
+            throw new InvalidOperationException($"Chat with ID {chatId} not found.");
+        }
+        
+        var assistantMessage = await _dbContext.Messages.FindAsync(assistantMessageId);
+        if (assistantMessage == null)
+        {
+            throw new InvalidOperationException($"Assistant message with ID {assistantMessageId} not found.");
+        }
+
+        // Get conversation history for AI context
+        var conversationHistory = await _dbContext.Messages
+            .Where(m => m.ChatId == chatId)
+            .OrderBy(m => m.SequenceNumber)
+            .ToListAsync(cancellationToken);
+
+        // Convert to LM messages
+        var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
+
+        // Generate streaming response
+        _logger.LogInformation("Making API call to LLM for existing chat {ChatId}", chatId);
+        var options = new GenerateReplyOptions { ModelId = "openrouter/horizon-beta" };
+        var streamingResponse = await _streamingAgent.GenerateReplyStreamingAsync(
+            lmMessages,
+            options,
+            cancellationToken: cancellationToken);
+        _logger.LogInformation("Received response from LLM for existing chat {ChatId}", chatId);
+
+        // Stream response and accumulate content
+        var responseBuffer = new StringBuilder();
+        
+        await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
+        {
+            if (message is TextUpdateMessage textMessage)
+            {
+                var content = textMessage.Text;
+                if (!string.IsNullOrEmpty(content))
+                {
+                    // Yield content for streaming
+                    yield return content;
+                    
+                    // Accumulate for final save
+                    responseBuffer.Append(content);
+
+                    // Publish stream chunk event
+                    if (StreamChunkReceived != null)
+                    {
+                        await StreamChunkReceived(new StreamChunkEvent(chatId, assistantMessageId, content, false));
+                    }
+                }
+            }
+        }
+
+        // Save the complete assistant response
+        assistantMessage.Content = responseBuffer.ToString();
+        _dbContext.Messages.Update(assistantMessage);
+        chat.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync();
+
+        // Publish stream complete event
+        if (StreamCompleted != null)
+        {
+            await StreamCompleted(new StreamCompleteEvent(chatId, assistantMessageId, assistantMessage.Content));
+        }
+    }
+
+    public async Task<MessageResult> AddUserMessageToExistingChatAsync(string chatId, string userId, string message)
+    {
+        try
+        {
+            // Get next sequence number for user message
+            var userSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chatId);
+            
+            // Save user message to database
+            var userMessage = new Message
+            {
+                ChatId = chatId,
+                Role = "user",
+                Content = message,
+                Timestamp = DateTime.UtcNow,
+                SequenceNumber = userSequenceNumber
+            };
+
+            _dbContext.Messages.Add(userMessage);
+            await _dbContext.SaveChangesAsync();
+
+            // Create user message DTO
+            var userMessageDto = new MessageDto
+            {
+                Id = userMessage.Id,
+                ChatId = chatId,
+                Role = "user",
+                Content = message,
+                Timestamp = userMessage.Timestamp,
+                SequenceNumber = userMessage.SequenceNumber
+            };
+
+            // Publish user message created event
+            if (MessageCreated != null)
+            {
+                await MessageCreated(new MessageCreatedEvent(chatId, userMessageDto));
+            }
+
+            return new MessageResult
+            {
+                Success = true,
+                UserMessage = userMessageDto,
+                AssistantMessage = null // No assistant message created
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding user message to existing chat {ChatId}", chatId);
+            return new MessageResult { Success = false, Error = "Failed to add user message" };
+        }
+    }
+
+    public async Task<int> GetNextSequenceNumberAsync(string chatId)
+    {
+        return await _messageSequenceService.GetNextSequenceNumberAsync(chatId);
+    }
+
+    public async Task<string> CreateAssistantMessageForStreamingAsync(string chatId, int sequenceNumber)
+    {
+        try
+        {
+            // Create empty assistant message for streaming
+            var assistantMessage = new Message
+            {
+                ChatId = chatId,
+                Role = "assistant",
+                Content = "", // Empty content, will be populated during streaming
+                Timestamp = DateTime.UtcNow,
+                SequenceNumber = sequenceNumber
+            };
+
+            _dbContext.Messages.Add(assistantMessage);
+            await _dbContext.SaveChangesAsync();
+
+            return assistantMessage.Id;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating assistant message for streaming in chat {ChatId}", chatId);
+            throw;
+        }
+    }
+
+    public async Task<string> GetMessageContentAsync(string messageId)
+    {
+        try
+        {
+            var message = await _dbContext.Messages
+                .Where(m => m.Id == messageId)
+                .Select(m => m.Content)
+                .FirstOrDefaultAsync();
+
+            return message ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving content for message {MessageId}", messageId);
+            throw;
+        }
+    }
+
+    public async Task<StreamInitResult> PrepareUnifiedStreamChatAsync(StreamChatRequest request)
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(request.ChatId))
+            {
+                // Adding message to existing chat
+                var userMessageResult = await AddUserMessageToExistingChatAsync(request.ChatId, request.UserId, request.Message);
+                if (!userMessageResult.Success)
+                {
+                    throw new InvalidOperationException(userMessageResult.Error ?? "Failed to add user message");
+                }
+
+                // Create assistant message for streaming
+                var assistantSeqNumber = await GetNextSequenceNumberAsync(request.ChatId);
+                var assistantMsgId = await CreateAssistantMessageForStreamingAsync(request.ChatId, assistantSeqNumber);
+                var assistantTime = DateTime.UtcNow;
+
+                return new StreamInitResult
+                {
+                    ChatId = request.ChatId,
+                    UserMessageId = userMessageResult.UserMessage!.Id,
+                    AssistantMessageId = assistantMsgId,
+                    UserTimestamp = userMessageResult.UserMessage.Timestamp,
+                    AssistantTimestamp = assistantTime,
+                    UserSequenceNumber = userMessageResult.UserMessage.SequenceNumber,
+                    AssistantSequenceNumber = assistantSeqNumber
+                };
+            }
+            else
+            {
+                // Creating new chat - use existing method
+                return await PrepareStreamChatAsync(request);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error preparing unified stream chat");
+            throw;
+        }
+    }
+
+    public async IAsyncEnumerable<string> StreamUnifiedChatCompletionAsync(
+        StreamChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrEmpty(request.ChatId))
+        {
+            // For existing chats, get the assistant message ID that was created
+            var assistantSeqNumber = await GetNextSequenceNumberAsync(request.ChatId) - 1; // Get the one we just created
+            var assistantMessage = await _dbContext.Messages
+                .Where(m => m.ChatId == request.ChatId && m.Role == "assistant" && m.SequenceNumber == assistantSeqNumber)
+                .FirstOrDefaultAsync(cancellationToken);
+            
+            if (assistantMessage == null)
+            {
+                _logger.LogError("Assistant message not found for streaming in chat {ChatId}", request.ChatId);
+                throw new InvalidOperationException("Assistant message not found for streaming");
+            }
+
+            // Stream using the existing method
+            await foreach (var chunk in StreamAssistantResponseAsync(request.ChatId, assistantMessage.Id, cancellationToken))
+            {
+                yield return chunk;
+            }
+        }
+        else
+        {
+            // For new chats, use existing streaming method
+            await foreach (var chunk in StreamChatCompletionAsync(request, cancellationToken))
+            {
+                yield return chunk;
+            }
+        }
+    }
+
     // Helper methods
     private async Task<string> GenerateAIResponseAsync(string chatId)
     {

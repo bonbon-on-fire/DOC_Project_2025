@@ -12,8 +12,15 @@ public interface IChatService
     
     // Message Operations
     Task<MessageResult> SendMessageAsync(SendMessageRequest request);
+    Task<MessageResult> AddUserMessageToExistingChatAsync(string chatId, string userId, string message);
     Task<StreamInitResult> PrepareStreamChatAsync(StreamChatRequest request);
+    Task<StreamInitResult> PrepareUnifiedStreamChatAsync(StreamChatRequest request);
     IAsyncEnumerable<string> StreamChatCompletionAsync(StreamChatRequest request, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<string> StreamUnifiedChatCompletionAsync(StreamChatRequest request, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<string> StreamAssistantResponseAsync(string chatId, string assistantMessageId, CancellationToken cancellationToken = default);
+    Task<int> GetNextSequenceNumberAsync(string chatId);
+    Task<string> CreateAssistantMessageForStreamingAsync(string chatId, int sequenceNumber);
+    Task<string> GetMessageContentAsync(string messageId);
     
     // Events for real-time notifications
     event Func<MessageCreatedEvent, Task>? MessageCreated;
@@ -38,6 +45,7 @@ public class SendMessageRequest
 
 public class StreamChatRequest
 {
+    public string? ChatId { get; set; } // null for new chats, populated for existing chats
     public required string UserId { get; set; }
     public required string Message { get; set; }
     public string? SystemPrompt { get; set; }
