@@ -7,7 +7,7 @@ import {
   setLatestMessage 
 } from '$lib/stores/messageState';
 import { registerBuiltInRenderers, getRenderer, getRendererComponent } from '$lib/renderers';
-import type { RichMessageDto } from '$lib/types';
+import type { RichMessageDto, TextMessageDto } from '$lib/types';
 
 // Test scenarios for E2E integration
 describe('RMR-P1-007: End-to-End Integration Tests', () => {
@@ -20,11 +20,11 @@ describe('RMR-P1-007: End-to-End Integration Tests', () => {
   describe('Complete Message Rendering Pipeline', () => {
     test('should handle complete text message workflow', async () => {
       // 1. Create a text message
-      const textMessage: RichMessageDto = {
+      const textMessage: RichMessageDto & TextMessageDto = {
         id: 'text-msg-1',
         chatId: 'test-chat',
         role: 'assistant',
-        content: 'Hello, this is a test message with **bold** text.',
+        text: 'Hello, this is a test message with **bold** text.',
         timestamp: new Date(),
         sequenceNumber: 1,
         messageType: 'text'
@@ -51,12 +51,12 @@ describe('RMR-P1-007: End-to-End Integration Tests', () => {
     
     test('should handle multiple message scenarios', async () => {
       // Create multiple messages
-      const messages: RichMessageDto[] = [
+    const messages: Array<RichMessageDto & TextMessageDto> = [
         {
           id: 'msg-1',
           chatId: 'test-chat',
           role: 'user',
-          content: 'First message',
+      text: 'First message',
           timestamp: new Date(Date.now() - 2000),
           sequenceNumber: 1,
           messageType: 'text'
@@ -65,7 +65,7 @@ describe('RMR-P1-007: End-to-End Integration Tests', () => {
           id: 'msg-2', 
           chatId: 'test-chat',
           role: 'assistant',
-          content: 'Second message',
+      text: 'Second message',
           timestamp: new Date(Date.now() - 1000),
           sequenceNumber: 2,
           messageType: 'text'
@@ -74,7 +74,7 @@ describe('RMR-P1-007: End-to-End Integration Tests', () => {
           id: 'msg-3',
           chatId: 'test-chat',
           role: 'assistant', 
-          content: 'Latest message',
+      text: 'Latest message',
           timestamp: new Date(),
           sequenceNumber: 3,
           messageType: 'text'
@@ -97,11 +97,11 @@ describe('RMR-P1-007: End-to-End Integration Tests', () => {
 
   describe('Error Handling and Edge Cases', () => {
     test('should handle unknown message types gracefully', async () => {
-      const unknownMessage: RichMessageDto = {
+      const unknownMessage: RichMessageDto & TextMessageDto = {
         id: 'unknown-msg',
         chatId: 'test-chat',
         role: 'assistant',
-        content: 'Message with unknown type',
+        text: 'Message with unknown type',
         timestamp: new Date(),
         sequenceNumber: 1,
         messageType: 'unknown-type'
@@ -118,11 +118,11 @@ describe('RMR-P1-007: End-to-End Integration Tests', () => {
     });
 
     test('should handle missing message types', async () => {
-      const noTypeMessage: RichMessageDto = {
+      const noTypeMessage: RichMessageDto & TextMessageDto = {
         id: 'no-type-msg',
         chatId: 'test-chat',
         role: 'assistant',
-        content: 'Message without type',
+        text: 'Message without type',
         timestamp: new Date(),
         sequenceNumber: 1
         // messageType is undefined

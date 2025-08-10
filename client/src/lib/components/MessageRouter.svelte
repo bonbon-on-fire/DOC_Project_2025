@@ -111,7 +111,15 @@
   // Reactive statement for render phase tracking
   $: if (mounted && currentMessageState) {
     // Update render phase based on message streaming state
-    const isStreaming = message.content?.includes('▋') || false; // Simple streaming detection
+    // Support different message payload shapes (text/reasoning), fallback to empty
+    const getMessageContent = (m: any): string => {
+      if (typeof m?.text === 'string') return m.text;
+      if (typeof m?.reasoning === 'string') return m.reasoning;
+      if (typeof m?.content === 'string') return m.content; // legacy fallback
+      return '';
+    };
+
+    const isStreaming = getMessageContent(message).includes('▋'); // Simple streaming detection
     const newPhase = isStreaming ? 'streaming' : 'complete';
     
     if (currentMessageState.renderPhase !== newPhase) {

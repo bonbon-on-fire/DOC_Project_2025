@@ -32,7 +32,7 @@ public class AIChatDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Title).IsRequired();
-            
+
             // Configure relationship with User
             entity.HasOne(e => e.User)
                   .WithMany(u => u.Chats)
@@ -46,7 +46,7 @@ public class AIChatDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Content).IsRequired();
             entity.Property(e => e.Role).IsRequired();
-            
+
             // Configure relationship with Chat
             entity.HasOne(e => e.Chat)
                   .WithMany(c => c.Messages)
@@ -67,7 +67,7 @@ public class AIChatDbContext : DbContext
         // Create a default system user for AI responses
         var systemUserId = "system-user-id";
         var demoUserId = "user-123";
-        
+
         modelBuilder.Entity<User>().HasData(
             new User
             {

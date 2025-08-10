@@ -20,6 +20,8 @@ export type {
   Message, 
   Chat, 
   MessageDto, 
+  TextMessageDto,
+  ReasoningMessageDto,
   RichMessageDto,
   ChatDto,
   CreateChatRequest,

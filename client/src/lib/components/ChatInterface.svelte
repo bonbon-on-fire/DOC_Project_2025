@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import ChatSidebar from './ChatSidebar.svelte';
   import ChatWindow from './ChatWindow.svelte';
-  import { chatActions, error } from '$lib/stores/chat';
+  import { chatActions, error, currentChat, chats } from '$lib/stores/chat';
 
   let isInitialized = false;
 
@@ -14,6 +14,11 @@
       console.error('Failed to initialize chat:', err);
     }
   });
+
+  // Auto-select the most recent chat if none is selected
+  $: if (isInitialized && !$currentChat && $chats.length > 0) {
+    chatActions.selectChat($chats[0].id);
+  }
 
   onDestroy(async () => {
     await chatActions.cleanup();
@@ -32,7 +37,7 @@
 
   <!-- Main Chat Area -->
   <div class="flex-1 flex flex-col">
-    {#if !isInitialized}
+    {#if !isInitialized && !$currentChat}
       <div class="flex-1 flex items-center justify-center">
         <div class="text-center">
           <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>

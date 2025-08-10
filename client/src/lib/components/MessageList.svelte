@@ -1,12 +1,12 @@
 <script lang="ts">
-  import type { MessageDto } from '$lib/types/chat';
+  import type { MessageDto, TextMessageDto, ReasoningMessageDto } from '$lib/types/chat';
   import MessageBubble from './MessageBubble.svelte';
-  export let messages: MessageDto[] = [];
+  export let messages: (MessageDto | TextMessageDto | ReasoningMessageDto)[] = [];
 
   let chatContainer: HTMLDivElement;
 </script>
 
-<div bind:this={chatContainer} class="max-w-4xl mx-auto px-4 py-6 space-y-6 overflow-y-auto">
+<div bind:this={chatContainer} class="max-w-4xl mx-auto px-4 py-6 space-y-6">
   {#if messages.length === 0}
     <!-- Empty State -->
     <div class="text-center py-12">

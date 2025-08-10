@@ -1,6 +1,6 @@
 // Svelte stores for chat state management
 import { writable, derived, get } from 'svelte/store';
-import type { ChatDto, MessageDto, CreateChatRequest } from '$lib/types/chat';
+import type { ChatDto, MessageDto, CreateChatRequest, TextMessageDto } from '$lib/types/chat';
 import { apiClient } from '$lib/api/client';
 import { streamChat } from '$lib/api/sse-client';
 
@@ -12,6 +12,8 @@ export const isLoading = writable(false);
 export const error = writable<string | null>(null);
 export const isStreaming = writable(false);
 export const currentStreamingMessage = writable('');
+export const currentReasoningMessage = writable('');
+export const currentReasoningVisibility = writable<string | null>(null);
 
 // User state (mock for now - will be replaced with actual auth)
 export const currentUser = writable({
@@ -111,6 +113,9 @@ export const chatActions = {
     try {
       error.set(null);
       isStreaming.set(true);
+      currentStreamingMessage.set('');
+      currentReasoningMessage.set('');
+      currentReasoningVisibility.set(null);
       
       // Create request object
       const request = {
@@ -145,46 +150,144 @@ export const chatActions = {
           const lines = buffer.split('\n\n');
           buffer = lines.pop() || '';
           
-          for (const line of lines) {
-            if (line.startsWith('event:') || line.startsWith('data:')) {
-              // Parse SSE event
-              const eventLines = line.split('\n');
-              let eventType = '';
-              let eventData = '';
-              
-              for (const eventLine of eventLines) {
-                if (eventLine.startsWith('event:')) {
-                  eventType = eventLine.substring(6).trim();
-                } else if (eventLine.startsWith('data:')) {
-                  eventData = eventLine.substring(5).trim();
-                }
-              }
+                     for (const line of lines) {
+             {
+               // Parse SSE event (ignore leading id: lines)
+               const eventLines = line.split('\n');
+               let eventType = '';
+               let eventData = '';
+               
+               for (const eventLine of eventLines) {
+                 if (eventLine.startsWith('event:')) {
+                   eventType = eventLine.substring(6).trim();
+                 } else if (eventLine.startsWith('data:')) {
+                   eventData = eventLine.substring(5).trim();
+                 }
+               }
               
               try {
                 const data = JSON.parse(eventData);
                 
-                // Handle different event types
+                // New envelope path: if data.kind exists, use eventType + kind
+                if (eventType && data && typeof data === 'object' && 'kind' in data) {
+                  const kind = data.kind as string;
+                  const payload = (data as any).payload || {};
+                  switch (eventType) {
+                    case 'init': {
+                      assistantMessageId = data.messageId;
+                      const userMessage: TextMessageDto = {
+                        id: payload.userMessageId || data.userMessageId,
+                        chatId: data.chatId,
+                        role: 'user',
+                        text: message,
+                        timestamp: new Date(payload.userTimestamp || data.ts),
+                        sequenceNumber: payload.userSequenceNumber ?? 0
+                      };
+                      const assistantPlaceholder: TextMessageDto = {
+                        id: data.messageId,
+                        chatId: data.chatId,
+                        role: 'assistant',
+                        text: '',
+                        timestamp: new Date(payload.assistantTimestamp || data.ts),
+                        sequenceNumber: payload.assistantSequenceNumber ?? (data.sequenceId ?? 1)
+                      };
+                      // Make sure the assistant placeholder is present in current chat view immediately
+                      currentChat.set({
+                        id: data.chatId,
+                        userId: user.id,
+                        title: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
+                        messages: [userMessage, assistantPlaceholder],
+                        createdAt: new Date(payload.userTimestamp || data.ts),
+                        updatedAt: new Date(payload.assistantTimestamp || data.ts)
+                      } as ChatDto);
+                      const newChat: ChatDto = {
+                        id: data.chatId,
+                        userId: user.id,
+                        title: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
+                        messages: [userMessage, assistantPlaceholder],
+                        createdAt: new Date(payload.userTimestamp || data.ts),
+                        updatedAt: new Date(payload.assistantTimestamp || data.ts)
+                      };
+                      chats.update(chats => [newChat, ...chats]);
+                      currentChatId.set(data.chatId);
+                      currentChat.set(newChat);
+                      // Ensure chat interface renders immediately
+                      isStreaming.set(true);
+                      break;
+                    }
+                    case 'messageupdate': {
+                      if (kind === 'text' && payload.delta) {
+                        currentStreamingMessage.update((msg: string) => msg + payload.delta);
+                      } else if (kind === 'reasoning' && payload.delta) {
+                        currentReasoningMessage.update((msg: string) => msg + payload.delta);
+                        if (payload.visibility) currentReasoningVisibility.set(payload.visibility);
+                      }
+                      break;
+                    }
+                    case 'complete': {
+                      const finalContent = (kind === 'text' && payload.content) ? payload.content : get(currentStreamingMessage);
+                      const chatId = get(currentChatId);
+                      if (chatId && assistantMessageId) {
+                        currentChat.update(chat => {
+                          if (!chat) return null;
+                          const updatedMessages = chat.messages.map(msg =>
+                            msg.id === assistantMessageId ? { ...msg, text: finalContent } : msg
+                          );
+                          return { ...chat, messages: updatedMessages, updatedAt: new Date() };
+                        });
+                        chats.update(chatList =>
+                          chatList.map(chat => {
+                            if (chat.id !== chatId) return chat;
+                            const updatedMessages = chat.messages.map(msg =>
+                              msg.id === assistantMessageId ? { ...msg, text: finalContent } : msg
+                            );
+                            return { ...chat, messages: updatedMessages, updatedAt: new Date() };
+                          })
+                        );
+                        currentStreamingMessage.set('');
+                        currentReasoningMessage.set('');
+                        currentReasoningVisibility.set(null);
+                      }
+                      reader.releaseLock();
+                      isStreaming.set(false);
+                      return;
+                    }
+                    case 'message': {
+                      if (kind === 'error') {
+                        error.set(payload.message || 'Streaming error occurred');
+                        reader.releaseLock();
+                        isStreaming.set(false);
+                        return;
+                      }
+                      break;
+                    }
+                  }
+                  // Continue loop
+                  continue;
+                }
+                
+                // Legacy path fallback
                 switch (data.type) {
                   case 'init':
                     // Initialize new chat and store assistant message ID
                     assistantMessageId = data.messageId;
                     
                     // Add user message with correct server timestamp
-                    const userMessage: MessageDto = {
+                    const userMessage: TextMessageDto = {
                         id: data.userMessageId,
                         chatId: data.chatId,
                         role: 'user',
-                        content: message,
+                        text: message,
                         timestamp: new Date(data.userTimestamp),
                         sequenceNumber: data.userSequenceNumber || 0
                     };
                     
                     // Add assistant placeholder for streaming
-                    const assistantPlaceholder: MessageDto = {
+                    const assistantPlaceholder: TextMessageDto = {
                         id: assistantMessageId,
                         chatId: data.chatId,
                         role: 'assistant',
-                        content: '',
+                        text: '',
                         timestamp: new Date(data.assistantTimestamp),
                         sequenceNumber: data.assistantSequenceNumber || 1
                     };
@@ -207,6 +310,15 @@ export const chatActions = {
                     // Add chunk to current message
                     if (data.delta) {
                       currentStreamingMessage.update((msg: string) => msg + data.delta);
+                    }
+                    break;
+                  
+                  case 'reasoning':
+                    if (data.delta) {
+                      currentReasoningMessage.update((msg: string) => msg + data.delta);
+                    }
+                    if (data.visibility) {
+                      currentReasoningVisibility.set(data.visibility);
                     }
                     break;
                     
@@ -234,6 +346,8 @@ export const chatActions = {
                                 return { ...chat, messages: updatedMessages, updatedAt: new Date() };
                             }));
                         currentStreamingMessage.set('');
+                        currentReasoningMessage.set('');
+                        currentReasoningVisibility.set(null);
                     }
 
                     // Stream is complete, exit the reading loop
@@ -247,7 +361,6 @@ export const chatActions = {
                     reader.releaseLock();
                     isStreaming.set(false);
                     return;
-                    break;
                 }
               } catch (parseError) {
                 console.error('Failed to parse SSE data:', parseError);
@@ -304,6 +417,9 @@ export const chatActions = {
     try {
       error.set(null);
       isStreaming.set(true);
+      currentStreamingMessage.set('');
+      currentReasoningMessage.set('');
+      currentReasoningVisibility.set(null);
 
       // Note: We'll add the user message when we receive the init event from the server
       // This ensures we use the correct timestamp from the database
@@ -335,11 +451,14 @@ export const chatActions = {
           buffer = lines.pop() || '';
 
           for (const line of lines) {
-            if (line.startsWith('event:') || line.startsWith('data:')) {
+            {
               const eventLines = line.split('\n');
+              let eventType = '';
               let eventData = '';
               for (const eventLine of eventLines) {
-                if (eventLine.startsWith('data:')) {
+                if (eventLine.startsWith('event:')) {
+                  eventType = eventLine.substring(6).trim();
+                } else if (eventLine.startsWith('data:')) {
                   eventData = eventLine.substring(5).trim();
                 }
               }
@@ -347,26 +466,113 @@ export const chatActions = {
               try {
                 const data = JSON.parse(eventData);
 
+                // New envelope-aware path
+                if (eventType && data && typeof data === 'object' && 'kind' in data) {
+                  const kind = data.kind as string;
+                  const payload = (data as any).payload || {};
+
+                  switch (eventType) {
+                    case 'init': {
+                      assistantMessageId = data.messageId;
+                      // Add user message with server timestamp
+                      const userMessage: TextMessageDto = {
+                        id: payload.userMessageId || data.userMessageId,
+                        chatId: chatId,
+                        role: 'user',
+                        text: message,
+                        timestamp: new Date(payload.userTimestamp || data.ts),
+                        sequenceNumber: payload.userSequenceNumber ?? 0
+                      };
+                      const assistantPlaceholder: TextMessageDto = {
+                        id: assistantMessageId,
+                        chatId: chatId,
+                        role: 'assistant',
+                        text: '',
+                        timestamp: new Date(payload.assistantTimestamp || data.ts),
+                        sequenceNumber: payload.assistantSequenceNumber ?? (data.sequenceId ?? 1)
+                      };
+                      currentChat.update(chat => chat ? { 
+                        ...chat, 
+                        messages: [...chat.messages, userMessage, assistantPlaceholder],
+                        updatedAt: new Date(payload.assistantTimestamp || data.ts)
+                      } : null);
+                      chats.update(chatList =>
+                        chatList.map(chat =>
+                          chat.id === chatId
+                            ? { 
+                                ...chat, 
+                                messages: [...chat.messages, userMessage, assistantPlaceholder],
+                                updatedAt: new Date(payload.assistantTimestamp || data.ts)
+                              }
+                            : chat
+                        )
+                      );
+                      break;
+                    }
+                    case 'messageupdate': {
+                      if (kind === 'text' && payload.delta) {
+                        currentStreamingMessage.update(msg => msg + payload.delta);
+                      } else if (kind === 'reasoning' && payload.delta) {
+                        currentReasoningMessage.update((msg: string) => msg + payload.delta);
+                        if (payload.visibility) currentReasoningVisibility.set(payload.visibility);
+                      }
+                      break;
+                    }
+                    case 'complete': {
+                                             const finalContent = (kind === 'text' && payload.content) ? payload.content : get(currentStreamingMessage);
+                       currentChat.update(chat => {
+                         if (!chat) return null;
+                         const updatedMessages = chat.messages.map(msg =>
+                           msg.id === assistantMessageId ? { ...msg, text: finalContent } : msg
+                         );
+                         return { ...chat, messages: updatedMessages, updatedAt: new Date() };
+                       });
+                       chats.update(chatList =>
+                         chatList.map(chat => {
+                           if (chat.id !== chatId) return chat;
+                           const updatedMessages = chat.messages.map(msg =>
+                             msg.id === assistantMessageId ? { ...msg, text: finalContent } : msg
+                           );
+                           return { ...chat, messages: updatedMessages, updatedAt: new Date() };
+                         })
+                       );
+                       currentStreamingMessage.set('');
+                       currentReasoningMessage.set('');
+                       currentReasoningVisibility.set(null);
+                       break;
+                    }
+                    case 'message': {
+                      if (kind === 'error') {
+                        error.set(payload.message || 'Streaming error occurred');
+                      }
+                      break;
+                    }
+                  }
+
+                  continue; // handled new path
+                }
+
+                // Legacy path
                 switch (data.type) {
                   case 'init':
                     assistantMessageId = data.messageId;
                     
                     // Add user message with correct server timestamp
-                    const userMessage: MessageDto = {
+                    const userMessage: TextMessageDto = {
                       id: data.userMessageId,
                       chatId: chatId,
                       role: 'user',
-                      content: message,
+                      text: message,
                       timestamp: new Date(data.userTimestamp),
                       sequenceNumber: data.userSequenceNumber || 0
                     };
                     
                     // Add assistant placeholder
-                    const assistantPlaceholder: MessageDto = {
+                    const assistantPlaceholder: TextMessageDto = {
                       id: assistantMessageId,
                       chatId: chatId,
                       role: 'assistant',
-                      content: '',
+                      text: '',
                       timestamp: new Date(data.assistantTimestamp),
                       sequenceNumber: data.assistantSequenceNumber || 1
                     };
@@ -396,8 +602,17 @@ export const chatActions = {
                     }
                     break;
 
+                  case 'reasoning':
+                    if (data.delta) {
+                      currentReasoningMessage.update((msg: string) => msg + data.delta);
+                    }
+                    if (data.visibility) {
+                      currentReasoningVisibility.set(data.visibility);
+                    }
+                    break;
+
                   case 'complete':
-                    const finalContent = data.content;
+                    const finalContent = data.content ?? get(currentStreamingMessage);
                     currentChat.update(chat => {
                       if (!chat) return null;
                       const updatedMessages = chat.messages.map(msg =>

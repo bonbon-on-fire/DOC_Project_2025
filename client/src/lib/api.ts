@@ -1,10 +1,11 @@
 import type { CreateChatRequest } from '$lib/types/chat';
+import { PUBLIC_API_BASE_URL } from '$env/static/public';
 
-const API_BASE_URL = 'http://localhost:5130/api';
+const API_BASE_URL = (PUBLIC_API_BASE_URL as any) || 'http://localhost:5099';
 
 export async function streamChat(payload: CreateChatRequest, onChunk: (chunk: any) => void, onComplete: (data: any) => void, onError: (error: any) => void) {
   try {
-    const response = await fetch(`${API_BASE_URL}/chat/stream-sse`, {
+    const response = await fetch(`${API_BASE_URL}/api/chat/stream-sse`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

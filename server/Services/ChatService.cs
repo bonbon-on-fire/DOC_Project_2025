@@ -6,6 +6,7 @@ using AchieveAi.LmDotnetTools.LmCore.Messages;
 using System.Collections.Immutable;
 using System.Text;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Options;
 
 namespace AIChat.Server.Services;
 
@@ -15,23 +16,28 @@ public class ChatService : IChatService
     private readonly IStreamingAgent _streamingAgent;
     private readonly IMessageSequenceService _messageSequenceService;
     private readonly ILogger<ChatService> _logger;
+    private readonly AiOptions _aiOptions;
 
     public ChatService(
         AIChatDbContext dbContext,
         IStreamingAgent streamingAgent,
         IMessageSequenceService messageSequenceService,
-        ILogger<ChatService> logger)
+        ILogger<ChatService> logger,
+        IOptions<AiOptions> aiOptions)
     {
         _dbContext = dbContext;
         _streamingAgent = streamingAgent;
         _messageSequenceService = messageSequenceService;
         _logger = logger;
+        _aiOptions = aiOptions.Value;
     }
 
     // Events for real-time notifications
     public event Func<MessageCreatedEvent, Task>? MessageCreated;
     public event Func<StreamChunkEvent, Task>? StreamChunkReceived;
     public event Func<StreamCompleteEvent, Task>? StreamCompleted;
+    public event Func<ReasoningStreamEvent, Task>? ReasoningChunkReceived;
+    public event Func<StreamChunkEvent, Task>? SideChannelReceived;
 
     public async Task<ChatResult> CreateChatAsync(CreateChatRequest request)
     {
@@ -50,7 +56,7 @@ public class ChatService : IChatService
 
             // Get sequence numbers for messages
             var userSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chat.Id);
-            
+
             // Add initial user message
             var userMessage = new Message
             {
@@ -83,10 +89,10 @@ public class ChatService : IChatService
 
             // Generate AI response
             var aiResponse = await GenerateAIResponseAsync(chat.Id);
-            
+
             // Get sequence number for assistant message
             var assistantSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chat.Id);
-            
+
             // Create assistant message
             var assistantMessage = new Message
             {
@@ -109,21 +115,21 @@ public class ChatService : IChatService
                 Title = chat.Title,
                 Messages = new List<MessageDto>
                 {
-                    new()
+                    new TextMessageDto
                     {
                         Id = userMessage.Id,
                         ChatId = chat.Id,
                         Role = "user",
-                        Content = request.Message,
+                        Text = request.Message,
                         Timestamp = userMessage.Timestamp,
                         SequenceNumber = userMessage.SequenceNumber
                     },
-                    new()
+                    new TextMessageDto
                     {
                         Id = assistantMessage.Id,
                         ChatId = chat.Id,
                         Role = "assistant",
-                        Content = aiResponse,
+                        Text = aiResponse,
                         Timestamp = assistantMessage.Timestamp,
                         SequenceNumber = assistantMessage.SequenceNumber
                     }
@@ -159,12 +165,12 @@ public class ChatService : IChatService
                 Id = chat.Id,
                 UserId = chat.UserId,
                 Title = chat.Title,
-                Messages = chat.Messages.Select(m => new MessageDto
+                Messages = chat.Messages.Select<Message, MessageDto>(m => new TextMessageDto
                 {
                     Id = m.Id,
                     ChatId = m.ChatId,
                     Role = m.Role,
-                    Content = m.Content,
+                    Text = m.Content,
                     Timestamp = m.Timestamp,
                     SequenceNumber = m.SequenceNumber
                 }).ToList(),
@@ -202,12 +208,12 @@ public class ChatService : IChatService
                 Id = c.Id,
                 UserId = c.UserId,
                 Title = c.Title,
-                Messages = c.Messages.Select(m => new MessageDto
+                Messages = c.Messages.Select<Message, MessageDto>(m => new TextMessageDto
                 {
                     Id = m.Id,
                     ChatId = m.ChatId,
                     Role = m.Role,
-                    Content = m.Content,
+                    Text = m.Content,
                     Timestamp = m.Timestamp,
                     SequenceNumber = m.SequenceNumber
                 }).ToList(),
@@ -236,7 +242,7 @@ public class ChatService : IChatService
         try
         {
             var chat = await _dbContext.Chats.FindAsync(chatId);
-            
+
             if (chat == null)
             {
                 return false;
@@ -260,7 +266,7 @@ public class ChatService : IChatService
         {
             // Get next sequence number for user message
             var userSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(request.ChatId);
-            
+
             // Save user message to database
             var userMessage = new Message
             {
@@ -275,12 +281,12 @@ public class ChatService : IChatService
             await _dbContext.SaveChangesAsync();
 
             // Create user message DTO
-            var userMessageDto = new MessageDto
+            var userMessageDto = new TextMessageDto
             {
                 Id = userMessage.Id,
                 ChatId = request.ChatId,
                 Role = "user",
-                Content = request.Message,
+                Text = request.Message,
                 Timestamp = userMessage.Timestamp,
                 SequenceNumber = userMessage.SequenceNumber
             };
@@ -293,10 +299,10 @@ public class ChatService : IChatService
 
             // Generate AI response
             var aiResponse = await GenerateAIResponseAsync(request.ChatId);
-            
+
             // Get next sequence number for assistant message
             var assistantSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(request.ChatId);
-            
+
             // Create assistant message
             var assistantMessage = new Message
             {
@@ -320,12 +326,12 @@ public class ChatService : IChatService
             await _dbContext.SaveChangesAsync();
 
             // Create assistant message DTO
-            var assistantMessageDto = new MessageDto
+            var assistantMessageDto = new TextMessageDto
             {
                 Id = assistantMessage.Id,
                 ChatId = request.ChatId,
                 Role = "assistant",
-                Content = aiResponse,
+                Text = aiResponse,
                 Timestamp = assistantMessage.Timestamp,
                 SequenceNumber = assistantMessage.SequenceNumber
             };
@@ -362,7 +368,7 @@ public class ChatService : IChatService
         };
 
         _dbContext.Chats.Add(chat);
-        
+
         // IMPORTANT: Save chat to database FIRST before getting sequence numbers
         await _dbContext.SaveChangesAsync();
 
@@ -400,7 +406,7 @@ public class ChatService : IChatService
 
         // Get sequence number for assistant message
         var assistantSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chat.Id);
-        
+
         // Create assistant message
         var assistantMessage = new Message
         {
@@ -435,32 +441,35 @@ public class ChatService : IChatService
     {
         // Prepare the chat first
         var initResult = await PrepareStreamChatAsync(request);
-        
+
         // Retrieve the chat and messages from database
         var chat = await _dbContext.Chats.FindAsync(initResult.ChatId);
         if (chat == null)
         {
             throw new InvalidOperationException($"Chat with ID {initResult.ChatId} not found.");
         }
-        
+
         var userMessage = await _dbContext.Messages.FindAsync(initResult.UserMessageId);
         if (userMessage == null)
         {
             throw new InvalidOperationException($"User message with ID {initResult.UserMessageId} not found.");
         }
-        
+
         // Get conversation history for AI context
         var conversationHistory = await _dbContext.Messages
             .Where(m => m.ChatId == chat.Id)
             .OrderBy(m => m.SequenceNumber)
             .ToListAsync(cancellationToken);
 
+        // Exclude placeholder/empty messages to satisfy provider requirements
+        conversationHistory = [.. conversationHistory.Where(m => !string.IsNullOrWhiteSpace(m.Content))];
+
         // Convert to LM messages
         var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
 
         // Generate streaming response
         _logger.LogInformation("Making API call to LLM for chat {ChatId}", chat.Id);
-        var options = new GenerateReplyOptions { ModelId = "openrouter/horizon-beta" };
+        var options = new GenerateReplyOptions { ModelId = GetModelId() }; // unified
         var streamingResponse = await _streamingAgent.GenerateReplyStreamingAsync(
             lmMessages,
             options,
@@ -489,7 +498,8 @@ public class ChatService : IChatService
 
         // Stream response and accumulate content
         var responseBuffer = new StringBuilder();
-        
+        var hadAnyTextChunk = false;
+
         await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
         {
             if (message is TextUpdateMessage textMessage)
@@ -499,16 +509,76 @@ public class ChatService : IChatService
                 {
                     // Yield content for streaming
                     yield return content;
-                    
+
                     // Accumulate for final save
                     responseBuffer.Append(content);
+                    hadAnyTextChunk = true;
 
                     // Publish stream chunk event
                     if (StreamChunkReceived != null)
                     {
-                        await StreamChunkReceived(new StreamChunkEvent(chat.Id, assistantMessage.Id, content, false));
+                        await StreamChunkReceived(new TextStreamEvent(chat.Id, assistantMessage.Id, content, false));
                     }
                 }
+            }
+            else if (message is ReasoningUpdateMessage reasoningUpdate)
+            {
+                // Skip encrypted reasoning updates
+                if (reasoningUpdate.Visibility == ReasoningVisibility.Encrypted)
+                {
+                    continue;
+                }
+                var delta = reasoningUpdate.Reasoning;
+                if (!string.IsNullOrEmpty(delta))
+                {
+                    if (ReasoningChunkReceived != null)
+                    {
+                        await ReasoningChunkReceived(new ReasoningStreamEvent(chat.Id, assistantMessage.Id, delta, reasoningUpdate.Visibility));
+                    }
+                    if (SideChannelReceived != null)
+                    {
+                        await SideChannelReceived(new ReasoningStreamEvent(chat.Id, assistantMessage.Id, delta, reasoningUpdate.Visibility));
+                    }
+                }
+            }
+            else if (message is ReasoningMessage reasoning)
+            {
+                // Skip encrypted full reasoning messages
+                if (reasoning.Visibility == ReasoningVisibility.Encrypted)
+                {
+                    continue;
+                }
+                var delta = reasoning.Reasoning;
+                if (!string.IsNullOrEmpty(delta))
+                {
+                    if (ReasoningChunkReceived != null)
+                    {
+                        await ReasoningChunkReceived(new ReasoningStreamEvent(chat.Id, assistantMessage.Id, delta, reasoning.Visibility));
+                    }
+                    if (SideChannelReceived != null)
+                    {
+                        await SideChannelReceived(new ReasoningStreamEvent(chat.Id, assistantMessage.Id, delta, reasoning.Visibility));
+                    }
+                }
+            }
+        }
+
+        // Fallback: if provider returned no text chunks, generate non-streaming reply
+        if (!hadAnyTextChunk)
+        {
+            try
+            {
+                var fallbackOptions = new GenerateReplyOptions { ModelId = GetModelId() };
+                var messages = await _streamingAgent.GenerateReplyAsync(lmMessages, fallbackOptions, cancellationToken);
+                var fullText = string.Join("", messages.OfType<TextMessage>().Select(m => m.Text));
+                if (!string.IsNullOrEmpty(fullText))
+                {
+                    responseBuffer.Append(fullText);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Non-streaming fallback failed for chat {ChatId}", chat.Id);
             }
         }
 
@@ -536,7 +606,7 @@ public class ChatService : IChatService
         {
             throw new InvalidOperationException($"Chat with ID {chatId} not found.");
         }
-        
+
         var assistantMessage = await _dbContext.Messages.FindAsync(assistantMessageId);
         if (assistantMessage == null)
         {
@@ -548,13 +618,14 @@ public class ChatService : IChatService
             .Where(m => m.ChatId == chatId)
             .OrderBy(m => m.SequenceNumber)
             .ToListAsync(cancellationToken);
+        conversationHistory = [.. conversationHistory.Where(m => !string.IsNullOrWhiteSpace(m.Content))];
 
         // Convert to LM messages
         var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
 
         // Generate streaming response
         _logger.LogInformation("Making API call to LLM for existing chat {ChatId}", chatId);
-        var options = new GenerateReplyOptions { ModelId = "openrouter/horizon-beta" };
+        var options = new GenerateReplyOptions { ModelId = GetModelId() }; // unified
         var streamingResponse = await _streamingAgent.GenerateReplyStreamingAsync(
             lmMessages,
             options,
@@ -563,7 +634,8 @@ public class ChatService : IChatService
 
         // Stream response and accumulate content
         var responseBuffer = new StringBuilder();
-        
+        var hadAnyTextChunk = false;
+
         await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
         {
             if (message is TextUpdateMessage textMessage)
@@ -573,16 +645,74 @@ public class ChatService : IChatService
                 {
                     // Yield content for streaming
                     yield return content;
-                    
+
                     // Accumulate for final save
                     responseBuffer.Append(content);
+                    hadAnyTextChunk = true;
 
                     // Publish stream chunk event
                     if (StreamChunkReceived != null)
                     {
-                        await StreamChunkReceived(new StreamChunkEvent(chatId, assistantMessageId, content, false));
+                        await StreamChunkReceived(new TextStreamEvent(chatId, assistantMessageId, content, false));
                     }
                 }
+            }
+            else if (message is ReasoningUpdateMessage reasoningUpdate)
+            {
+                if (reasoningUpdate.Visibility == ReasoningVisibility.Encrypted)
+                {
+                    continue;
+                }
+                var delta = reasoningUpdate.Reasoning;
+                if (!string.IsNullOrEmpty(delta))
+                {
+                    if (ReasoningChunkReceived != null)
+                    {
+                        await ReasoningChunkReceived(new ReasoningStreamEvent(chatId, assistantMessageId, delta, reasoningUpdate.Visibility));
+                    }
+                    if (SideChannelReceived != null)
+                    {
+                        await SideChannelReceived(new ReasoningStreamEvent(chatId, assistantMessageId, delta, reasoningUpdate.Visibility));
+                    }
+                }
+            }
+            else if (message is ReasoningMessage reasoning)
+            {
+                if (reasoning.Visibility == ReasoningVisibility.Encrypted)
+                {
+                    continue;
+                }
+                var delta = reasoning.Reasoning;
+                if (!string.IsNullOrEmpty(delta))
+                {
+                    if (ReasoningChunkReceived != null)
+                    {
+                        await ReasoningChunkReceived(new ReasoningStreamEvent(chatId, assistantMessageId, delta, reasoning.Visibility));
+                    }
+                    if (SideChannelReceived != null)
+                    {
+                        await SideChannelReceived(new ReasoningStreamEvent(chatId, assistantMessageId, delta, reasoning.Visibility));
+                    }
+                }
+            }
+        }
+
+        // Fallback: if provider returned no text chunks, generate non-streaming reply
+        if (!hadAnyTextChunk)
+        {
+            try
+            {
+                var fallbackOptions = new GenerateReplyOptions { ModelId = GetModelId() };
+                var messages = await _streamingAgent.GenerateReplyAsync(lmMessages, fallbackOptions, cancellationToken);
+                var fullText = string.Join("", messages.OfType<TextMessage>().Select(m => m.Text));
+                if (!string.IsNullOrEmpty(fullText))
+                {
+                    responseBuffer.Append(fullText);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Non-streaming fallback failed for existing chat {ChatId}", chatId);
             }
         }
 
@@ -605,7 +735,7 @@ public class ChatService : IChatService
         {
             // Get next sequence number for user message
             var userSequenceNumber = await _messageSequenceService.GetNextSequenceNumberAsync(chatId);
-            
+
             // Save user message to database
             var userMessage = new Message
             {
@@ -620,12 +750,12 @@ public class ChatService : IChatService
             await _dbContext.SaveChangesAsync();
 
             // Create user message DTO
-            var userMessageDto = new MessageDto
+            var userMessageDto = new TextMessageDto
             {
                 Id = userMessage.Id,
                 ChatId = chatId,
                 Role = "user",
-                Content = message,
+                Text = message,
                 Timestamp = userMessage.Timestamp,
                 SequenceNumber = userMessage.SequenceNumber
             };
@@ -752,7 +882,7 @@ public class ChatService : IChatService
             var assistantMessage = await _dbContext.Messages
                 .Where(m => m.ChatId == request.ChatId && m.Role == "assistant" && m.SequenceNumber == assistantSeqNumber)
                 .FirstOrDefaultAsync(cancellationToken);
-            
+
             if (assistantMessage == null)
             {
                 _logger.LogError("Assistant message not found for streaming in chat {ChatId}", request.ChatId);
@@ -786,10 +916,12 @@ public class ChatService : IChatService
                 .OrderBy(m => m.SequenceNumber)
                 .ToListAsync();
 
+            conversationHistory = [.. conversationHistory.Where(m => !string.IsNullOrWhiteSpace(m.Content))];
+
             var lmMessages = conversationHistory.Select(ConvertToLmMessage).ToList();
-            
+
             // Generate response using IStreamingAgent (non-streaming)
-            var options = new GenerateReplyOptions { ModelId = "moonshotai/kimi-k2" };
+            var options = new GenerateReplyOptions { ModelId = GetModelId() }; // unified
             var messages = await _streamingAgent.GenerateReplyAsync(lmMessages, options);
             return string.Join("", messages.OfType<TextMessage>().Select(m => m.Text));
         }
@@ -799,6 +931,8 @@ public class ChatService : IChatService
             return $"Error: Failed to generate AI response. {ex.Message}";
         }
     }
+
+    private string GetModelId() => _aiOptions.ModelId ?? "openrouter/horizon-beta";
 
     private static IMessage ConvertToLmMessage(Message message)
     {
@@ -813,7 +947,7 @@ public class ChatService : IChatService
         return new TextMessage
         {
             Role = role,
-            Text = message.Content,
+            Text = message.Content ?? string.Empty,
             Metadata = ImmutableDictionary<string, object>.Empty
         };
     }
@@ -821,10 +955,9 @@ public class ChatService : IChatService
     private static string GenerateChatTitle(string firstMessage)
     {
         // Generate a simple title from the first message
-        var title = firstMessage.Length > 50 
+        var title = firstMessage.Length > 50
             ? firstMessage[..47] + "..."
             : firstMessage;
-        
         return title;
     }
 }

@@ -32,7 +32,9 @@ End of message`;
     
     // Wait for conversation and AI response
     await page.waitForURL('**/chat', { timeout: 10000 });
-    await expect(page.getByText('2 messages')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-content').first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-count')).toHaveText(/\b2 messages\b/, { timeout: 20000 });
     
     // Wait for auto-scroll to complete
     await page.waitForTimeout(2000);
@@ -70,7 +72,9 @@ End of first message`;
     await sendButton.click();
     
     await page.waitForURL('**/chat', { timeout: 10000 });
-    await expect(page.getByText('2 messages')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-content').first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-count')).toHaveText(/\b2 messages\b/, { timeout: 20000 });
     
     // Send another message to ensure scrollable content
     const tallMessage2 = `Second Tall Message
@@ -82,7 +86,7 @@ End of second message`;
     const chatSendButton = page.getByRole('button', { name: 'Send message (Enter)' });
     await chatSendButton.click();
     
-    await expect(page.getByText('4 messages')).toBeVisible({ timeout: 25000 });
+    await expect(page.getByTestId('message-count')).toHaveText(/\b4 messages\b/, { timeout: 25000 });
     
     // Get scroll container
     const scrollContainer = page.locator('.flex-1.overflow-y-auto.bg-gray-50').first();
@@ -123,7 +127,7 @@ End of second message`;
     await messageInput.fill(shortMessage);
     await chatSendButton.click();
     
-    await expect(page.getByText(shortMessage)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('message-content').filter({ hasText: "<|user_post|><|text_message|> " + shortMessage }).first()).toBeVisible({ timeout: 10000 });
     
     // The scroll should auto-scroll to bottom again when we send a new message
     await page.waitForTimeout(1000);
@@ -153,7 +157,9 @@ End message 1`;
     await sendButton.click();
     
     await page.waitForURL('**/chat', { timeout: 10000 });
-    await expect(page.getByText('2 messages')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-content').first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-count')).toHaveText(/\b2 messages\b/, { timeout: 20000 });
     
     // Create second conversation
     const message2 = `Second Conversation
@@ -184,11 +190,11 @@ End message 2`;
     await page.waitForTimeout(1000);
     
     // Switch back to first conversation
-    const firstConvButton = page.getByRole('button').filter({ hasText: 'First Conversation' }).first();
+    const firstConvButton = page.getByTestId('chat-item-title').filter({ hasText: 'First Conversation' }).first();
     await expect(firstConvButton).toBeVisible();
     await firstConvButton.click();
     
-    await expect(page.getByText('First Conversation')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('message-count')).toBeVisible({ timeout: 10000 });
     await page.waitForTimeout(2000); // Give more time for auto-scroll
     
     // Verify first conversation scrolled to bottom

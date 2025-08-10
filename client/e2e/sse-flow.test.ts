@@ -10,30 +10,32 @@ test('SSE flow sends fully decorated init event and handles streaming correctly'
   // Wait for the page to load
   await page.waitForLoadState('networkidle');
   
-  // Find the chat input field
-  const chatInput = page.locator('textarea');
+  // Find the new chat input field in the sidebar
+  const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
   await expect(chatInput).toBeVisible();
   
-  // Test message for SSE flow validation
-  const testMessage = 'Test';
+  // Test message for SSE flow validation (unique to avoid selector collisions)
+  const testMessage = `SSE-Flow ${Date.now()}`;
   
   // Type the test message
   await chatInput.fill(testMessage);
   
-  // Submit the message by clicking the send button
-  const sendButton = page.locator('button[type="submit"]').first();
+  // Submit the message by clicking the sidebar New Chat button
+  const sendButton = page.getByRole('button', { name: 'New Chat' });
   await sendButton.click();
   
   // Wait for SSE events to be processed
   // We'll wait for the chat to be created and streaming to complete
-  await page.waitForTimeout(5000);
+  await page.waitForURL('**/chat', { timeout: 10000 });
+  await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByTestId('message-content').first()).toBeVisible({ timeout: 20000 });
   
   // Verify chat appears in sidebar
-  const chatItem = page.locator('[data-testid="chat-item"]').first();
+  const chatItem = page.getByTestId('chat-item').first();
   await expect(chatItem).toBeVisible();
   
   // Verify user message is displayed
-  const userMessage = page.locator('[data-testid="message-content"]', { hasText: testMessage });
+  const userMessage = page.getByTestId('message-content').filter({ hasText: testMessage }).first();
   await expect(userMessage).toBeVisible();
   
   // Verify assistant message placeholder exists

@@ -1,10 +1,18 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { browser } from '$app/environment';
   import { onMount } from 'svelte';
 
   onMount(() => {
-    // Redirect to chat page
-    goto('/chat');
+    // Redirect to chat page (skip during SSR/tests)
+    const isTest = typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test';
+    if (browser && !isTest) {
+      try {
+        goto('/chat');
+      } catch {
+        // ignore navigation errors in non-app contexts
+      }
+    }
   });
 </script>
 

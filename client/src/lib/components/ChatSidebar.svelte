@@ -1,6 +1,17 @@
 <script lang="ts">
   import { chats, currentChatId, chatActions, isLoading, currentUser, isStreaming } from '$lib/stores/chat';
   import { formatTime } from '$lib/utils/time';
+  
+  function getPreviewText(msg: any): string {
+    if (!msg) return '';
+    // Support both legacy and new DTOs
+    if (typeof msg.text === 'string' && msg.text.trim()) return msg.text;
+    if (typeof msg.content === 'string' && msg.content.trim()) return msg.content;
+    // Be defensive in case casing slips through
+    if (typeof msg.Text === 'string' && msg.Text.trim()) return msg.Text;
+    if (typeof msg.Reasoning === 'string' && msg.Reasoning.trim()) return msg.Reasoning;
+    return '';
+  }
 
   let newChatMessage = '';
 
@@ -107,15 +118,16 @@
             on:keydown={(e) => e.key === 'Enter' && selectChat(chat.id)}
             role="button"
             tabindex="0"
+            data-testid="chat-item"
           >
             <div class="flex items-start justify-between">
               <div class="flex-1 min-w-0">
-                <p class="font-medium text-gray-900 dark:text-white truncate">
+                <p class="font-medium text-gray-900 dark:text-white truncate" data-testid="chat-item-title">
                   {chat.title}
                 </p>
                 {#if chat.messages.length > 0}
                   <p class="text-sm text-gray-500 dark:text-gray-400 truncate mt-1">
-                    {chat.messages[chat.messages.length - 1].content}
+                    {getPreviewText(chat.messages[chat.messages.length - 1])}
                   </p>
                 {/if}
                 <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">

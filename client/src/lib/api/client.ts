@@ -9,15 +9,19 @@ import type {
 export class ApiClient {
   private baseUrl: string;
 
-  constructor(baseUrl: string = PUBLIC_API_BASE_URL) {
-    this.baseUrl = baseUrl;
+  constructor(baseUrl: string = (PUBLIC_API_BASE_URL as any) || '') {
+    // Prefer explicit env, otherwise in dev (vite on 5173) hit server directly to avoid proxy buffering SSE
+    if (!baseUrl && typeof window !== 'undefined' && window.location.port === '5173') {
+      baseUrl = 'http://localhost:5099';
+    }
+    this.baseUrl = baseUrl || '';
   }
 
   private async request<T>(
     endpoint: string, 
     options: RequestInit = {}
   ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+    const url = this.baseUrl ? `${this.baseUrl}${endpoint}` : endpoint;
     
     const config: RequestInit = {
       headers: {
@@ -78,7 +82,7 @@ export class ApiClient {
   }
 
   async streamChatCompletion(request: CreateChatRequest): Promise<Response> {
-    const url = `${this.baseUrl}/api/chat/stream-sse`;
+    const url = this.baseUrl ? `${this.baseUrl}/api/chat/stream-sse` : `/api/chat/stream-sse`;
     
     const response = await fetch(url, {
       method: 'POST',

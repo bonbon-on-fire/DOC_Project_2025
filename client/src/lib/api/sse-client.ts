@@ -1,9 +1,19 @@
 import { PUBLIC_API_BASE_URL } from '$env/static/public';
 import type { CreateChatRequest } from '$lib/types/chat';
 
-export async function streamChat(payload: CreateChatRequest, onChunk: (chunk: any) => void, onComplete: (data: any) => void, onError: (error: any) => void) {
+export async function streamChat(
+  payload: CreateChatRequest,
+  onChunk: (chunk: any) => void,
+  onComplete: (data: any) => void,
+  onError: (error: any) => void
+) {
   try {
-    const response = await fetch(`${PUBLIC_API_BASE_URL}/api/chat/stream-sse`, {
+    let base = PUBLIC_API_BASE_URL as any;
+    // Prefer explicit env; if not set and running vite on 5173 (dev/test), default to Test server 5099
+    if (!base && typeof window !== 'undefined' && window.location.port === '5173') {
+      base = 'http://localhost:5099';
+    }
+    const response = await fetch(`${base || ''}/api/chat/stream-sse`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -16,7 +26,7 @@ export async function streamChat(payload: CreateChatRequest, onChunk: (chunk: an
     const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
     let buffer = '';
 
-    while (true) {
+  while (true) {
       const { value, done } = await reader.read();
       if (done) break;
 
@@ -44,7 +54,7 @@ export async function streamChat(payload: CreateChatRequest, onChunk: (chunk: an
         }
         boundary = buffer.indexOf('\n\n');
       }
-    }
+  }
   } catch (err) {
     onError(err);
   }

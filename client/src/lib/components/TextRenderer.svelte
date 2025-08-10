@@ -1,10 +1,10 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { MessageDto } from '$lib/types';
+  import type { MessageDto, TextMessageDto } from '$lib/types';
   import type { MessageRenderer } from '$lib/types/renderer';
 
   // Component props with proper TypeScript typing
-  export let message: MessageDto;
+  export let message: TextMessageDto;
   export let isLatest: boolean = false;
 
   // Create event dispatcher for custom events
@@ -23,10 +23,10 @@
     return parseMarkdown(content, { devLogging: true });
   }
 
-  $: safeContent = renderContent(message.content);
+  $: safeContent = renderContent((message as TextMessageDto).text);
 
   // Component implements MessageRenderer interface
-  const rendererInterface: MessageRenderer<MessageDto> = {
+  const rendererInterface: MessageRenderer<TextMessageDto> = {
     messageType: 'text',
     // Text messages don't have expand functionality - they're always visible
     onExpand: undefined
@@ -139,10 +139,7 @@
     box-shadow: 0 0 0 1px rgb(96 165 250 / 0.1);
   }
 
-  /* RTL language support */
-  [dir="rtl"] .text-content {
-    text-align: right;
-  }
+  /* RTL support removed to avoid unused selector warning; re-add with a global wrapper when needed */
 
   /* High contrast mode support */
   @media (prefers-contrast: high) {

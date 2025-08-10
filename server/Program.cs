@@ -9,6 +9,11 @@ using AchieveAi.LmDotnetTools.Misc.Storage;
 using AchieveAi.LmDotnetTools.Misc.Configuration;
 using AchieveAi.LmDotnetTools.Misc.Http;
 using Lib.AspNetCore.ServerSentEvents;
+using AIChat.Server.Models;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Hosting;
+using AIChat.Server.Services.TestMode;
+using AIChat.Server.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,9 +22,17 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Configure Entity Framework with SQLite
-builder.Services.AddDbContext<AIChatDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+// Configure Entity Framework
+if (builder.Environment.IsEnvironment("Test"))
+{
+    builder.Services.AddDbContext<AIChatDbContext>(options =>
+        options.UseInMemoryDatabase("AIChatTestDb"));
+}
+else
+{
+    builder.Services.AddDbContext<AIChatDbContext>(options =>
+        options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+}
 
 // Add SignalR with increased timeout values
 builder.Services.AddSignalR(hubOptions =>
@@ -33,63 +46,81 @@ builder.Services.AddSignalR(hubOptions =>
 // Add LmConfig services
 builder.Services.AddLmConfig(builder.Configuration.GetSection("LmConfig"));
 
+// Bind AI model selection options
+builder.Services.Configure<AiOptions>(builder.Configuration.GetSection("AI"));
+
 // Register IStreamingAgent as scoped service
 builder.Services.AddTransient<IStreamingAgent>(
-    provider => {
-    // Register IStreamingAgent as an OpenAIProvider-based agent with caching
-    // Get configuration - prioritize environment variables, then User Secrets/config
-    var configuration = provider.GetRequiredService<IConfiguration>();
-    var logger = provider.GetRequiredService<ILogger<Program>>();
-    
-    var apiKey = Environment.GetEnvironmentVariable("LLM_API_KEY") 
-                 ?? configuration["OpenAI:ApiKey"] 
-                 ?? "";
-    var baseUrl = Environment.GetEnvironmentVariable("LLM_BASE_API_URL") 
-                  ?? configuration["OpenAI:BaseUrl"] 
-                  ?? "https://api.openai.com/v1";
-
-    // Diagnostic logging for API configuration
-    logger.LogInformation("[DIAGNOSTIC] API Configuration:");
-    logger.LogInformation("[DIAGNOSTIC] Base URL: {BaseUrl}", baseUrl);
-    logger.LogInformation("[DIAGNOSTIC] API Key Length: {ApiKeyLength}", apiKey?.Length ?? 0);
-    logger.LogInformation("[DIAGNOSTIC] API Key Prefix: {ApiKeyPrefix}", apiKey?.Length > 10 ? apiKey.Substring(0, 10) + "..." : "[EMPTY]");
-
-    // Create an OpenAI client with caching
-    if (string.IsNullOrEmpty(apiKey))
+    provider =>
     {
-        throw new InvalidOperationException("OpenAI API key is required but was not provided.");
-    }
-    
-    // Create cache infrastructure
-    var cacheDirectory = configuration["LlmCache:CacheDirectory"] ?? "./llm-cache";
-    var cache = new AchieveAi.LmDotnetTools.Misc.Storage.FileKvStore(cacheDirectory);
-    
-    // Configure cache options
-    var cacheOptions = new AchieveAi.LmDotnetTools.Misc.Configuration.LlmCacheOptions
-    {
-        EnableCaching = configuration.GetValue<bool>("LlmCache:EnableCaching", true),
-        CacheExpiration = configuration.GetValue<TimeSpan?>("LlmCache:CacheExpiration", TimeSpan.FromHours(24)),
-        MaxCacheItems = configuration.GetValue<int?>("LlmCache:MaxCacheItems", 10000)
-    };
-    
-    // Create HTTP client with caching handler
-    var httpClientHandler = new HttpClientHandler();
-    var cachingHandler = new AchieveAi.LmDotnetTools.Misc.Http.CachingHttpMessageHandler(cache, cacheOptions, httpClientHandler, logger);
-    
-    var httpClient = new HttpClient(cachingHandler)
-    {
-        BaseAddress = new Uri(baseUrl),
-        Timeout = TimeSpan.FromMinutes(5)
-    };
-    
-    // Add authentication headers
-    httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
-    
-    var openClient = new AchieveAi.LmDotnetTools.OpenAIProvider.Agents.OpenClient(httpClient, baseUrl, null, logger);
-    return new AchieveAi.LmDotnetTools.OpenAIProvider.Agents.OpenClientAgent("OpenAi", openClient);
-});
+        // Register IStreamingAgent as an OpenAIProvider-based agent with caching
+        // Get configuration - prioritize environment variables, then User Secrets/config
+        var configuration = provider.GetRequiredService<IConfiguration>();
+        var logger = provider.GetRequiredService<ILogger<Program>>();
+        var hostEnv = provider.GetRequiredService<IHostEnvironment>();
 
-// Add CORS for development
+        var apiKey = Environment.GetEnvironmentVariable("LLM_API_KEY")
+                     ?? configuration["OpenAI:ApiKey"]
+                     ?? "";
+        var baseUrl = Environment.GetEnvironmentVariable("LLM_BASE_API_URL")
+                      ?? configuration["OpenAI:BaseUrl"]
+                      ?? "https://api.openai.com/v1";
+
+        // Diagnostic logging for API configuration
+        logger.LogInformation("[DIAGNOSTIC] API Configuration:");
+        logger.LogInformation("[DIAGNOSTIC] Base URL: {BaseUrl}", baseUrl);
+        logger.LogInformation("[DIAGNOSTIC] API Key Length: {ApiKeyLength}", apiKey?.Length ?? 0);
+        logger.LogInformation("[DIAGNOSTIC] API Key Prefix: {ApiKeyPrefix}", apiKey?.Length > 10 ? apiKey.Substring(0, 10) + "..." : "[EMPTY]");
+
+        if (hostEnv.IsEnvironment("Test"))
+        {
+            // In Test environment, synthesize streaming via TestSseMessageHandler and bypass API key
+            var testHandler = new TestSseMessageHandler();
+            var testHttpClient = new HttpClient(testHandler)
+            {
+                BaseAddress = new Uri(baseUrl),
+                Timeout = TimeSpan.FromMinutes(5)
+            };
+            var openClientTest = new OpenClient(testHttpClient, baseUrl, null, logger);
+            return new OpenClientAgent("OpenAi", openClientTest);
+        }
+
+        // Create an OpenAI client with caching (non-Test environments)
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            throw new InvalidOperationException("OpenAI API key is required but was not provided.");
+        }
+
+        // Create cache infrastructure
+        var cacheDirectory = configuration["LlmCache:CacheDirectory"] ?? "./llm-cache";
+        var cache = new FileKvStore(cacheDirectory);
+
+        // Configure cache options
+        var cacheOptions = new LlmCacheOptions
+        {
+            EnableCaching = configuration.GetValue<bool>("LlmCache:EnableCaching", true),
+            CacheExpiration = configuration.GetValue<TimeSpan?>("LlmCache:CacheExpiration", TimeSpan.FromHours(24)),
+            MaxCacheItems = configuration.GetValue<int?>("LlmCache:MaxCacheItems", 10000)
+        };
+
+        // Create HTTP client with caching handler
+        var httpClientHandler = new HttpClientHandler();
+        var cachingHandler = new CachingHttpMessageHandler(cache, cacheOptions, httpClientHandler, logger);
+
+        var httpClient = new HttpClient(cachingHandler)
+        {
+            BaseAddress = new Uri(baseUrl),
+            Timeout = TimeSpan.FromMinutes(5)
+        };
+
+        // Add authentication headers
+        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+
+        var openClient = new OpenClient(httpClient, baseUrl, null, logger);
+        return new OpenClientAgent("OpenAi", openClient);
+    });
+
+// Add CORS for development and test
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowSvelteApp", policy =>
@@ -114,14 +145,26 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Add logging
-builder.Services.AddLogging();
+// Add logging and register a timestamped Debug logger for Dev/Test so VS Output shows timestamps
+builder.Services.AddLogging(logging =>
+{
+    // Clear default providers to avoid duplicate outputs when running under VS
+    logging.ClearProviders();
+
+    // Always include Console; timestamp format is configured via appsettings.*.json
+    logging.AddConsole();
+
+    // Add our timestamped Debug provider so VS Immediate/Output shows timestamps
+    if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Test"))
+    {
+        logging.AddProvider(new TimestampedDebugLoggerProvider());
+    }
+});
 
 // Add Server-Sent Events services
 builder.Services.AddServerSentEvents();
 
 // Add custom SSE service
-builder.Services.AddScoped<SseService>();
 
 // Add message sequence service
 builder.Services.AddScoped<IMessageSequenceService, MessageSequenceService>();
@@ -138,24 +181,36 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// Apply database migrations on startup
+// Apply database migrations or ensure clean DB in Test
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<AIChatDbContext>();
     try
     {
-        context.Database.Migrate();
+        if (app.Environment.IsEnvironment("Test"))
+        {
+            context.Database.EnsureDeleted();
+            context.Database.EnsureCreated();
+        }
+        else
+        {
+            context.Database.Migrate();
+        }
     }
     catch (Exception ex)
     {
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while migrating the database");
+        logger.LogError(ex, "An error occurred while initializing the database");
     }
 }
 
 app.UseCors("AllowSvelteApp");
 
-app.UseHttpsRedirection();
+// Skip HTTPS redirection in Test (HTTP-only)
+if (!app.Environment.IsEnvironment("Test"))
+{
+    app.UseHttpsRedirection();
+}
 
 app.MapControllers();
 app.MapHub<ChatHub>("/api/chat-hub");

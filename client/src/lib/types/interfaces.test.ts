@@ -5,18 +5,18 @@ import type {
   StreamingHandler, 
   StreamingUpdate,
   ExpandableComponent,
-  MessageDto 
+  MessageDto, TextMessageDto 
 } from './index.js';
 
 describe('Core TypeScript Interfaces', () => {
   describe('MessageRenderer Interface', () => {
     test('should accept valid MessageRenderer implementation', () => {
       // Mock MessageDto for testing
-      const mockMessage: MessageDto = {
+      const mockMessage: MessageDto & { text?: string } = {
         id: 'test-message-1',
         chatId: 'test-chat-1',
         role: 'assistant',
-        content: 'Test content',
+        text: 'Test content',
         timestamp: new Date(),
         sequenceNumber: 1
       };
@@ -58,7 +58,7 @@ describe('Core TypeScript Interfaces', () => {
 
     test('should support generic type constraints', () => {
       // Extended message type
-      interface ExtendedMessageDto extends MessageDto {
+  interface ExtendedMessageDto extends MessageDto {
         customField: string;
       }
 
@@ -259,7 +259,7 @@ describe('Core TypeScript Interfaces', () => {
   describe('Integration Tests', () => {
     test('should work together in a realistic scenario', () => {
       // Mock a complete message renderer implementation
-      const textRenderer: MessageRenderer<MessageDto> & ExpandableComponent = {
+  const textRenderer: MessageRenderer<TextMessageDto> & ExpandableComponent = {
         messageType: 'text',
         isCollapsible: false, // Text messages don't collapse
         onExpand: vi.fn()

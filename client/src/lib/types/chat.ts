@@ -57,7 +57,7 @@ export interface ChatDto {
   id: string;
   userId: string;
   title: string;
-  messages: MessageDto[];
+  messages: (TextMessageDto | ReasoningMessageDto | MessageDto)[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -66,9 +66,17 @@ export interface MessageDto {
   id: string;
   chatId: string;
   role: string;
-  content: string;
   timestamp: Date;
   sequenceNumber: number;
+}
+
+export interface TextMessageDto extends MessageDto {
+  text: string;
+}
+
+export interface ReasoningMessageDto extends MessageDto {
+  reasoning: string;
+  visibility?: 'Plain' | 'Summary' | 'Encrypted';
 }
 
 /**

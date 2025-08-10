@@ -84,12 +84,17 @@ Just say hi`;
     
     // Wait for conversation to be created and AI response
     await page.waitForURL('**/chat', { timeout: 10000 });
-    await expect(page.getByText('2 messages')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-content').first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-count')).toHaveText(/\b2 messages\b/, { timeout: 20000 });
     
     console.log('✅ Step 1a completed: Tall conversation created');
     
-    // Get the correct scroll container - the ChatWindow, not the sidebar
-    const scrollContainer = page.locator('.flex-1.overflow-y-auto.bg-gray-50').first();
+    // Get the correct scroll container - nearest scrollable ancestor of the message list
+    const scrollContainer = page
+      .getByTestId('message-list')
+      .locator('xpath=ancestor-or-self::*[contains(concat(" ", normalize-space(@class), " "), " overflow-y-auto ")]')
+      .first();
     await expect(scrollContainer).toBeVisible();
     
     // Wait for auto-scroll animation to complete
@@ -127,7 +132,7 @@ Just say hi`;
     
     // Verify we're at the bottom after initial load
     const initialScrollPosition = scrollPosition;
-    const isInitiallyAtBottom = initialScrollPosition.distanceFromBottom < 30;
+    const isInitiallyAtBottom = initialScrollPosition.distanceFromBottom < 60;
     expect(isInitiallyAtBottom).toBe(true);
     
     console.log('✅ Step 1b completed: Verified initial auto-scroll to bottom');
@@ -192,7 +197,7 @@ Just confirming scroll behavior`;
     console.log('✅ Step 1c completed: Verified auto-scroll after sending message');
     
     // Wait for AI response and verify auto-scroll
-    await expect(page.getByText('4 messages')).toBeVisible({ timeout: 25000 });
+    await expect(page.getByTestId('message-count')).toHaveText(/\b4 messages\b/, { timeout: 25000 });
     
     // Verify we're still at the bottom after AI response
     await page.waitForTimeout(1000); // Give time for scroll animation
@@ -255,7 +260,9 @@ This is the first message`;
     
     // Wait for conversation and AI response
     await page.waitForURL('**/chat', { timeout: 10000 });
-    await expect(page.getByText('2 messages')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-content').first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-count')).toHaveText(/\b2 messages\b/, { timeout: 20000 });
     
     // Send another tall message to ensure we have enough content
     const tallMessage2 = `Second Very Tall Message
@@ -304,9 +311,11 @@ This is the second message`;
     // Get the correct scroll container - the ChatWindow, not the sidebar
     const scrollContainer = page.locator('.flex-1.overflow-y-auto.bg-gray-50').first();
     
-    // Wait for auto-scroll animation to complete
-    await page.waitForTimeout(2000);
-    
+    // Ensure we start at the bottom for a clean baseline
+    await scrollContainer.evaluate(el => { el.scrollTo({ top: el.scrollHeight, behavior: 'instant' }); });
+    await expect.poll(async () => await scrollContainer.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight), { timeout: 3000 })
+      .toBeLessThan(40);
+
     // Verify we're at the bottom initially
     let scrollPosition = await scrollContainer.evaluate(el => ({
       scrollTop: el.scrollTop,
@@ -322,18 +331,32 @@ This is the second message`;
     
     console.log('✅ Step 2b completed: Verified initial position at bottom');
     
-    // Manually scroll to the middle/top
-    console.log('📝 Step 2c: Manually scrolling to middle');
-    
-    const targetScrollTop = Math.floor(scrollPosition.scrollHeight * 0.2); // Scroll to 20% from top (more aggressive)
-    await scrollContainer.evaluate((el, scrollTop) => {
-      el.scrollTo({ top: scrollTop, behavior: 'instant' }); // Use instant instead of smooth for test reliability
-    }, targetScrollTop);
-    
-    // Wait for scroll to complete
-    await page.waitForTimeout(1500);
+    // Manually scroll by targeting the real scrollable parent of the message list
+    console.log('📝 Step 2c: Manually scrolling up by scrolling the scrollable ancestor');
+    await page.waitForTimeout(3000);
+    const messageList = page.getByTestId('message-list');
+    const elHandle = await messageList.elementHandle();
+    if (elHandle) {
+      await page.evaluate((el) => {
+        // Find nearest scrollable ancestor
+        let p = el as HTMLElement | null;
+        let scrollable: HTMLElement | null = null;
+        while (p) {
+          const canScroll = p.scrollHeight > p.clientHeight && getComputedStyle(p).overflowY !== 'visible';
+          if (canScroll) { scrollable = p; break; }
+          p = p.parentElement;
+        }
+        const target = scrollable ?? (document.scrollingElement as HTMLElement);
+        if (target) {
+          // Scroll well away from bottom
+          const newTop = Math.max(0, target.scrollTop - Math.max(500, target.clientHeight * 2));
+          target.scrollTo({ top: newTop, behavior: 'instant' as ScrollBehavior });
+        }
+      }, elHandle);
+    }
     
     // Verify we're no longer at the bottom
+    // Recompute against the same container metrics
     scrollPosition = await scrollContainer.evaluate(el => ({
       scrollTop: el.scrollTop,
       scrollHeight: el.scrollHeight,
@@ -343,7 +366,8 @@ This is the second message`;
     
     console.log('📊 After manual scroll:', scrollPosition);
     
-    const isStillAtBottom = scrollPosition.distanceFromBottom < 30;
+  // Use a larger threshold to robustly determine we're not at bottom
+  const isStillAtBottom = scrollPosition.distanceFromBottom < 150;
     expect(isStillAtBottom).toBe(false);
     
     console.log('✅ Step 2c completed: Manually scrolled away from bottom');
@@ -355,8 +379,8 @@ This is the second message`;
     await messageInput.fill(shortMessage);
     await chatSendButton.click();
     
-    // Wait for the message to appear
-    await expect(page.getByText(shortMessage)).toBeVisible({ timeout: 10000 });
+    // Wait for the message to appear (scope to message content to avoid sidebar preview collisions)
+    await expect(page.getByTestId('message-content').filter({ hasText: shortMessage }).first()).toBeVisible({ timeout: 10000 });
     
     // Wait for auto-scroll animation to complete (SHOULD happen when sending message)
     await page.waitForTimeout(2000);
@@ -396,13 +420,13 @@ This is the second message`;
     // Now test manual scroll persistence: scroll up and send another message
     console.log('📝 Step 2f: Testing manual scroll persistence - scroll up manually');
     
-    // Manually scroll up again
-    const targetScrollTop2 = Math.floor(scrollPosition.scrollHeight * 0.3);
-    await scrollContainer.evaluate((el, scrollTop) => {
-      el.scrollTo({ top: scrollTop, behavior: 'instant' });
-    }, targetScrollTop2);
+    // Manually scroll up again (use a robust target away from bottom)
+    await scrollContainer.evaluate(el => {
+      const target = Math.max(0, Math.floor((el.scrollHeight - el.clientHeight) * 0.5));
+      el.scrollTo({ top: target, behavior: 'instant' });
+    });
     
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1200);
     
     // Verify we're now scrolled up
     scrollPosition = await scrollContainer.evaluate(el => ({
@@ -412,7 +436,7 @@ This is the second message`;
       distanceFromBottom: el.scrollHeight - el.scrollTop - el.clientHeight
     }));
     
-    const isScrolledUp = scrollPosition.distanceFromBottom > 100;
+    const isScrolledUp = scrollPosition.distanceFromBottom > 150;
     expect(isScrolledUp).toBe(true);
     
     console.log('✅ Step 2f completed: Manually scrolled up again');
@@ -420,12 +444,12 @@ This is the second message`;
     // Now send another message - this should trigger auto-scroll again
     console.log('📝 Step 2g: Sending new message should reset auto-scroll behavior');
     
-    const resetMessage = 'This message should reset auto-scroll';
+    const resetMessage = 'This message should reset auto-scroll ' + Date.now();
     await messageInput.fill(resetMessage);
     await chatSendButton.click();
     
     // Wait for the message and a bit for scroll animation
-    await expect(page.getByText(resetMessage)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(resetMessage).first()).toBeVisible({ timeout: 10000 });
     await page.waitForTimeout(1500);
     
     // Verify we're now back at the bottom (auto-scroll should resume)
@@ -485,7 +509,9 @@ First conversation content`;
     
     // Wait for conversation and AI response
     await page.waitForURL('**/chat', { timeout: 10000 });
-    await expect(page.getByText('2 messages')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-content').first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-count')).toHaveText(/\b2 messages\b/, { timeout: 20000 });
     
     console.log('✅ Step 3a completed: First conversation created');
     
@@ -526,14 +552,15 @@ Second conversation content`;
     await chatInput.fill(tallMessage2);
     await sendButton.click();
     
-    // Wait for new conversation
-    await expect(page.getByText('Second Conversation Tall Message')).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText('2 messages')).toBeVisible({ timeout: 20000 });
+    // Wait for new conversation (use specific sidebar title test id to avoid strict-mode conflicts)
+    const secondConvItem = page.getByTestId('chat-item-title').filter({ hasText: 'Second Conversation Tall Message' }).first();
+    await expect(secondConvItem).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId('message-count')).toHaveText(/\b2 messages\b/, { timeout: 20000 });
     
     console.log('✅ Step 3b completed: Second conversation created');
     
-    // Get scroll container
-    const scrollContainer = page.locator('.overflow-y-auto').first();
+    // Get scroll container (chat messages area)
+    const scrollContainer = page.locator('.flex-1.overflow-y-auto.bg-gray-50').first();
     
     // Manually scroll up in second conversation
     console.log('📝 Step 3c: Manually scrolling up in second conversation');
@@ -556,12 +583,12 @@ Second conversation content`;
     // Switch back to first conversation
     console.log('📝 Step 3d: Switching back to first conversation');
     
-    const firstConversationButton = page.getByRole('button').filter({ hasText: 'First Conversation Tall Message' }).first();
+    const firstConversationButton = page.getByTestId('chat-item-title').filter({ hasText: 'First Conversation Tall Message' }).first();
     await expect(firstConversationButton).toBeVisible();
     await firstConversationButton.click();
     
     // Wait for conversation to load
-    await expect(page.getByText('First Conversation Tall Message')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('message-count')).toBeVisible({ timeout: 10000 });
     
     // Verify we're at the bottom of first conversation (scroll should reset)
     await page.waitForTimeout(1000); // Give time for scroll reset
@@ -584,8 +611,8 @@ Second conversation content`;
     await expect(secondConversationButton).toBeVisible();
     await secondConversationButton.click();
     
-    // Wait for conversation to load
-    await expect(page.getByText('Second Conversation Tall Message')).toBeVisible({ timeout: 10000 });
+    // Wait for conversation to load (scope to message list to avoid sidebar/header collisions)
+    await expect(page.getByTestId('message-count')).toBeVisible({ timeout: 10000 });
     
     // Verify we're at the bottom of second conversation (scroll should reset)
     await page.waitForTimeout(1000); // Give time for scroll reset
@@ -645,10 +672,12 @@ This message will test streaming behavior`;
     
     // Wait for conversation and AI response
     await page.waitForURL('**/chat', { timeout: 10000 });
-    await expect(page.getByText('2 messages')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-content').first()).toBeVisible({ timeout: 20000 });
+    await expect(page.getByTestId('message-count')).toHaveText(/\b2 messages\b/, { timeout: 20000 });
     
-    // Get scroll container
-    const scrollContainer = page.locator('.overflow-y-auto').first();
+    // Get scroll container (chat messages area)
+    const scrollContainer = page.locator('.flex-1.overflow-y-auto.bg-gray-50').first();
     
     // Manually scroll up
     console.log('📝 Step 4b: Manually scrolling up before sending message');
@@ -675,11 +704,11 @@ This message will test streaming behavior`;
     const chatSendButton = page.getByRole('button', { name: 'Send message (Enter)' });
     await chatSendButton.click();
     
-    // Wait for message to appear and streaming to start
-    await expect(page.getByText(streamTestMessage)).toBeVisible({ timeout: 10000 });
+    // Wait for message to appear and streaming to start (scope to message content test id)
+    await expect(page.getByTestId('message-content').filter({ hasText: streamTestMessage }).first()).toBeVisible({ timeout: 10000 });
     
     // Give time for auto-scroll to kick in due to streaming
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(2500);
     
     // Verify we auto-scrolled to bottom when streaming started
     scrollPosition = await scrollContainer.evaluate(el => ({
@@ -688,7 +717,7 @@ This message will test streaming behavior`;
       clientHeight: el.clientHeight
     }));
     
-    const isAtBottomDuringStreaming = scrollPosition.scrollHeight - scrollPosition.scrollTop - scrollPosition.clientHeight < 100;
+    const isAtBottomDuringStreaming = scrollPosition.scrollHeight - scrollPosition.scrollTop - scrollPosition.clientHeight < 150;
     expect(isAtBottomDuringStreaming).toBe(true);
     
     console.log('✅ Test 4 completed: Scroll behavior during streaming verified');

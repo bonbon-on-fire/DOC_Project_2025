@@ -20,7 +20,7 @@ public class ChatHub : Hub
     {
         _chatService = chatService;
         _logger = logger;
-        
+
         // Subscribe to ChatService events for real-time broadcasting
         _chatService.MessageCreated += OnMessageCreated;
         _chatService.StreamChunkReceived += OnStreamChunkReceived;
@@ -49,13 +49,13 @@ public class ChatHub : Hub
                 UserId = userId,
                 Message = message
             };
-            
+
             var result = await _chatService.SendMessageAsync(sendRequest);
-            
+
             if (!result.Success)
             {
                 _logger.LogError("Error sending message for chat {ChatId}: {Error}", chatId, result.Error);
-                
+
                 await Clients.Group($"chat_{chatId}").SendAsync("ReceiveError", new
                 {
                     ChatId = chatId,
@@ -71,7 +71,7 @@ public class ChatHub : Hub
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing message for chat {ChatId}", chatId);
-            
+
             await Clients.Group($"chat_{chatId}").SendAsync("ReceiveError", new
             {
                 ChatId = chatId,
@@ -89,7 +89,7 @@ public class ChatHub : Hub
             Id = messageEvent.Message.Id,
             ChatId = messageEvent.Message.ChatId,
             Role = messageEvent.Message.Role,
-            Content = messageEvent.Message.Content,
+            Content = (messageEvent.Message as TextMessageDto)?.Text ?? string.Empty,
             Timestamp = messageEvent.Message.Timestamp,
             SequenceNumber = messageEvent.Message.SequenceNumber
         });
@@ -102,7 +102,8 @@ public class ChatHub : Hub
             MessageId = chunkEvent.MessageId,
             ChatId = chunkEvent.ChatId,
             Delta = chunkEvent.Delta,
-            Done = chunkEvent.Done
+            Done = chunkEvent.Done,
+            Kind = chunkEvent.Kind
         });
     }
 
@@ -127,7 +128,7 @@ public class ChatHub : Hub
     {
         _logger.LogInformation("Client {ConnectionId} disconnected from ChatHub", Context.ConnectionId);
         await base.OnDisconnectedAsync(exception);
-        
+
         // Unsubscribe from events when client disconnects
         _chatService.MessageCreated -= OnMessageCreated;
         _chatService.StreamChunkReceived -= OnStreamChunkReceived;

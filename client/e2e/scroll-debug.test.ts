@@ -12,7 +12,9 @@ test('Debug scroll container', async ({ page }) => {
   
   // Wait for conversation
   await page.waitForURL('**/chat', { timeout: 10000 });
-  await expect(page.getByText('2 messages')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });
+  await expect(page.getByTestId('message-content').first()).toBeVisible({ timeout: 20000 });
+  await expect(page.getByTestId('message-count')).toHaveText(/\b2 messages\b/, { timeout: 20000 });
   
   // Debug the scroll containers
   const containers = await page.locator('.overflow-y-auto').count();

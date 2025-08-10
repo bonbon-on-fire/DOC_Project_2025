@@ -2,14 +2,13 @@
   import type { RichMessageDto } from '$lib/types/chat';
   import { formatTime } from '$lib/utils/time';
   import { currentStreamingMessage, isStreaming } from '$lib/stores/chat';
+  import { currentReasoningMessage } from '$lib/stores/chat';
 
   export let message: RichMessageDto;
   export let isLastAssistantMessage = false;
   
   // Additional props for compatibility with MessageRouter
-  export let expanded: boolean = true;
-  export let renderPhase: string = 'complete';
-  export let isLatest: boolean = false;
+  // removed unused props to avoid build warnings
 
   function formatContent(content: string): string {
     // Basic markdown-like formatting
@@ -18,6 +17,18 @@
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
       .replace(/`(.*?)`/g, '<code class="bg-gray-200 dark:bg-gray-700 px-1 rounded text-sm">$1</code>')
       .replace(/\n/g, '<br>');
+  }
+
+  function getMessageText(msg: any): string {
+    if (!msg) return '';
+    // Support new DTOs (camelCase)
+    if (typeof (msg as any).text === 'string' && (msg as any).text.trim()) return (msg as any).text;
+    if (typeof (msg as any).reasoning === 'string' && (msg as any).reasoning.trim()) return (msg as any).reasoning;
+    // Legacy/casing fallbacks from server serialization
+    if (typeof (msg as any).Text === 'string' && (msg as any).Text.trim()) return (msg as any).Text;
+    if (typeof (msg as any).Reasoning === 'string' && (msg as any).Reasoning.trim()) return (msg as any).Reasoning;
+    if (typeof (msg as any).content === 'string' && (msg as any).content.trim()) return (msg as any).content;
+    return '';
   }
 </script>
 
@@ -55,21 +66,29 @@
         {/if}
 
         <!-- Message text with basic formatting -->
-        <div class="prose prose-sm max-w-none dark:prose-invert
-                    {message.role === 'user' ? 'prose-invert' : ''}
-                    {message.role === 'system' ? 'text-yellow-800 dark:text-yellow-200' : 'dark:text-gray-300'}">
+        <div
+          class="prose prose-sm max-w-none dark:prose-invert"
+          class:prose-invert={message.role === 'user'}
+          class:text-yellow-800={message.role === 'system'}
+          class:dark\:text-yellow-200={message.role === 'system'}
+          class:dark\:text-gray-300={message.role !== 'system'}>
           {#if isLastAssistantMessage && $isStreaming && message.role === 'assistant'}
-            {@html formatContent($currentStreamingMessage)}
+            {#if $currentReasoningMessage.trim()}
+              <div class="mb-2 text-xs text-gray-500 dark:text-gray-400 border-l-2 border-gray-300 dark:border-gray-600 pl-2">
+                {@html formatContent($currentReasoningMessage)}
+              </div>
+            {/if}
+            <div data-testid="message-content">{@html formatContent($currentStreamingMessage)}</div>
             <span class="animate-pulse">▋</span>
           {:else}
-            {@html formatContent(message.content)}
+            <div data-testid="message-content">{@html formatContent(getMessageText(message))}</div>
           {/if}
         </div>
       </div>
 
       <!-- Timestamp -->
       <div class="mt-1 text-xs text-gray-500 dark:text-gray-400 
-                  {message.role === 'user' ? 'text-right' : 'text-left'}">
+                  {message.role === 'user' ? 'text-right' : 'text-left'}" data-testid="message-timestamp">
         {formatTime(message.timestamp)}
       </div>
     </div>

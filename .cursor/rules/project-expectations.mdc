@@ -1,13 +1,16 @@
 ---
-applyTo: '**'
+alwaysApply: true
 ---
 
-Whenever you encounter compiler errors in the code, search the web for solutions. Use the following steps:
+# Expectations
 
-1. Identify the compiler/language version
-2. Check the error message for specific keywords
-3. Use a search engine to look up the error message along with the compiler/language version
-4. Review the search results for relevant solutions or discussions
+1. This is brand new project, don't worry about backward compat.
+2. Don't worry about database schema update, we can re-create the database for new schema. If you do care about it, it's up to you.
+  a. If you don't care, then you should check schema version, if there is version mismatch, nuke the tables/schema and recrate new with new schema version.
+  b. If you do want to upgrade the schema, then do as needful.
+
+3. For ever server change analyze if client also needs to change.
+4. When debugging UX test cases, also USE `playwright` MCP TOOL CALLS to manually verify the functionality / bug.
 
 ## Running tests
 

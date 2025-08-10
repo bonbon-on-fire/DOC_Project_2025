@@ -1,16 +1,16 @@
 import { describe, test, expect, beforeEach } from 'vitest';
-import type { MessageDto } from '$lib/types';
+import type { MessageDto, TextMessageDto } from '$lib/types';
 import type { MessageRenderer } from '$lib/types/renderer';
 
 describe('TextRenderer Component Logic', () => {
-  let mockMessage: MessageDto;
+  let mockMessage: TextMessageDto;
 
   beforeEach(() => {
     mockMessage = {
       id: 'test-message-1',
       chatId: 'test-chat-1',
       role: 'assistant',
-      content: 'Hello, world!',
+      text: 'Hello, world!',
       timestamp: new Date(),
       sequenceNumber: 1
     };
@@ -19,7 +19,7 @@ describe('TextRenderer Component Logic', () => {
   describe('Interface Compliance', () => {
     test('implements MessageRenderer interface correctly', () => {
       // Validate the component implements the required interface
-      const textRenderer: MessageRenderer<MessageDto> = {
+  const textRenderer: MessageRenderer<TextMessageDto> = {
         messageType: 'text'
       };
 
@@ -161,7 +161,7 @@ describe('TextRenderer Component Logic', () => {
 
       expect(validProps.message).toBeDefined();
       expect(validProps.message.id).toBe('test-message-1');
-      expect(validProps.message.content).toBe('Hello, world!');
+  expect(validProps.message.text).toBe('Hello, world!');
       expect(typeof validProps.isLatest).toBe('boolean');
     });
 
@@ -178,7 +178,7 @@ describe('TextRenderer Component Logic', () => {
       expect(mockMessage.id).toBeDefined();
       expect(mockMessage.chatId).toBeDefined();
       expect(mockMessage.role).toBeDefined();
-      expect(mockMessage.content).toBeDefined();
+  expect(mockMessage.text).toBeDefined();
       expect(mockMessage.timestamp).toBeInstanceOf(Date);
       expect(typeof mockMessage.sequenceNumber).toBe('number');
     });
@@ -189,7 +189,7 @@ describe('TextRenderer Component Logic', () => {
       const largeContent = 'A'.repeat(10000);
       const largeMessage = {
         ...mockMessage,
-        content: largeContent
+        text: largeContent
       };
 
       const start = performance.now();
@@ -200,7 +200,7 @@ describe('TextRenderer Component Logic', () => {
         return content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       }
       
-      const result = processTextContent(largeMessage.content);
+  const result = processTextContent(largeMessage.text);
       const end = performance.now();
 
       expect(result).toHaveLength(10000);

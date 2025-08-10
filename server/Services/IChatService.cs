@@ -1,4 +1,6 @@
+using AchieveAi.LmDotnetTools.LmCore.Messages;
 using AIChat.Server.Models;
+using System.Text.Json.Serialization;
 
 namespace AIChat.Server.Services;
 
@@ -9,7 +11,7 @@ public interface IChatService
     Task<ChatResult> GetChatAsync(string chatId);
     Task<ChatHistoryResult> GetChatHistoryAsync(string userId, int page, int pageSize);
     Task<bool> DeleteChatAsync(string chatId);
-    
+
     // Message Operations
     Task<MessageResult> SendMessageAsync(SendMessageRequest request);
     Task<MessageResult> AddUserMessageToExistingChatAsync(string chatId, string userId, string message);
@@ -21,11 +23,13 @@ public interface IChatService
     Task<int> GetNextSequenceNumberAsync(string chatId);
     Task<string> CreateAssistantMessageForStreamingAsync(string chatId, int sequenceNumber);
     Task<string> GetMessageContentAsync(string messageId);
-    
+
     // Events for real-time notifications
     event Func<MessageCreatedEvent, Task>? MessageCreated;
     event Func<StreamChunkEvent, Task>? StreamChunkReceived;
     event Func<StreamCompleteEvent, Task>? StreamCompleted;
+    event Func<ReasoningStreamEvent, Task>? ReasoningChunkReceived; // NEW: reasoning streaming side-channel
+    event Func<StreamChunkEvent, Task>? SideChannelReceived; // NEW: generic side-channel event for all kinds
 }
 
 // Request types
@@ -91,8 +95,12 @@ public class ChatHistoryResult
 
 // Event types for real-time notifications
 public record MessageCreatedEvent(string ChatId, MessageDto Message);
-public record StreamChunkEvent(string ChatId, string MessageId, string Delta, bool Done);
+public abstract record StreamChunkEvent(string ChatId, string MessageId, string Delta, bool Done, string Kind);
 public record StreamCompleteEvent(string ChatId, string MessageId, string FullContent);
+public record ReasoningStreamEvent(string ChatId, string MessageId, string Delta, ReasoningVisibility? Visibility)
+   : StreamChunkEvent(ChatId, MessageId, Delta, false, "reasoning");
+public record TextStreamEvent(string ChatId, string MessageId, string Delta, bool Done)
+   : StreamChunkEvent(ChatId, MessageId, Delta, Done, "text");
 
 // DTO types (moved from ChatController for reuse)
 public class ChatDto
@@ -105,12 +113,29 @@ public class ChatDto
     public DateTime UpdatedAt { get; set; }
 }
 
+// Enable polymorphic serialization so derived message content (text/reasoning) is included in JSON
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "messageType")]
+[JsonDerivedType(typeof(TextMessageDto), typeDiscriminator: "text")]
+[JsonDerivedType(typeof(ReasoningMessageDto), typeDiscriminator: "reasoning")]
 public class MessageDto
 {
     public required string Id { get; set; }
     public required string ChatId { get; set; }
     public required string Role { get; set; }
-    public required string Content { get; set; }
     public DateTime Timestamp { get; set; }
     public int SequenceNumber { get; set; }
+}
+
+public class TextMessageDto : MessageDto
+{
+    public required string Text { get; set; }
+}
+
+public class ReasoningMessageDto : MessageDto
+{
+    public required string Reasoning { get; set; }
+
+    public ReasoningVisibility Visibility { get; set; }
+
+    public string? GetText() => Visibility == ReasoningVisibility.Encrypted ? null : Reasoning;
 }

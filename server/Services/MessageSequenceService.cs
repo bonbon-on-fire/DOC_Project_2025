@@ -19,12 +19,9 @@ public class MessageSequenceService : IMessageSequenceService
 
     public async Task<int> GetNextSequenceNumberAsync(string chatId)
     {
-        // Use a transaction to ensure atomicity when calculating the next sequence number
-        using var transaction = await _dbContext.Database.BeginTransactionAsync();
-        
-        try
+        // InMemory provider does not support transactions; compute without transaction in that case
+        if (_dbContext.Database.IsInMemory())
         {
-            // Lock the chat record to prevent race conditions
             var chat = await _dbContext.Chats
                 .Where(c => c.Id == chatId)
                 .FirstOrDefaultAsync();
@@ -34,7 +31,26 @@ public class MessageSequenceService : IMessageSequenceService
                 throw new InvalidOperationException($"Chat with ID {chatId} not found");
             }
 
-            // Get the highest sequence number for this chat
+            var maxSequenceNumber = await _dbContext.Messages
+                .Where(m => m.ChatId == chatId)
+                .MaxAsync(m => (int?)m.SequenceNumber) ?? -1;
+
+            return maxSequenceNumber + 1;
+        }
+
+        // Use a transaction to ensure atomicity when calculating the next sequence number (relational providers)
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        try
+        {
+            var chat = await _dbContext.Chats
+                .Where(c => c.Id == chatId)
+                .FirstOrDefaultAsync();
+
+            if (chat == null)
+            {
+                throw new InvalidOperationException($"Chat with ID {chatId} not found");
+            }
+
             var maxSequenceNumber = await _dbContext.Messages
                 .Where(m => m.ChatId == chatId)
                 .MaxAsync(m => (int?)m.SequenceNumber) ?? -1;

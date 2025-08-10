@@ -1,7 +1,5 @@
 import { marked } from 'marked';
 import createDOMPurify from 'dompurify';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 // Lazy JSDOM usage for Node/SSR test environment (vitest server project)
 let jsdomWindow: any | undefined;
 
@@ -29,14 +27,27 @@ export function parseMarkdown(markdown: string, opts?: { devLogging?: boolean })
     // Lazy import jsdom only when necessary to keep runtime light in browser.
     if (!jsdomWindow) {
       try {
-        const { JSDOM } = require('jsdom');
-        jsdomWindow = new JSDOM('<!DOCTYPE html><html><body></body></html>').window;
+        // Use dynamic import to avoid bundling Node-only deps in browser build
+        // @ts-ignore
+        const jsdomMod = (globalThis as any).require
+          ? (globalThis as any).require('jsdom')
+          : undefined;
+        if (jsdomMod && jsdomMod.JSDOM) {
+          jsdomWindow = new jsdomMod.JSDOM('<!DOCTYPE html><html><body></body></html>').window;
+        } else {
+          // Fallback minimal sanitation via regex (no DOM APIs)
+          return rawHtml
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            // Remove inline event handlers (quoted and unquoted)
+            .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+            .replace(/href=("|')javascript:[^"']*("|')/gi, 'href="#"');
+        }
       } catch {
         // Fallback minimal sanitation via regex (no DOM APIs)
         return rawHtml
           .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-          .replace(/ on[a-z]+="[^"]*"/gi, '')
-          .replace(/ on[a-z]+='[^']*'/gi, '')
+          // Remove inline event handlers (quoted and unquoted)
+          .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
           .replace(/href=("|')javascript:[^"']*("|')/gi, 'href="#"');
       }
     }
@@ -88,8 +99,7 @@ export function parseMarkdown(markdown: string, opts?: { devLogging?: boolean })
     // Remove any lingering script tags
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     // Remove inline event handlers
-    .replace(/ on[a-z]+="[^"]*"/gi, '')
-    .replace(/ on[a-z]+='[^']*'/gi, '')
+    .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     // Neutralize javascript: protocols that might slip through
     .replace(/href=("|')javascript:[^"']*("|')/gi, 'href="#"');
 

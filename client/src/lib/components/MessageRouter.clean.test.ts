@@ -8,24 +8,24 @@ import {
   getMessageState
 } from '$lib/stores/messageState';
 import { getRenderer, rendererRegistry } from '$lib/renderers';
-import type { RichMessageDto } from '$lib/types';
+import type { RichMessageDto, TextMessageDto } from '$lib/types';
 
 // Test data
-const mockTextMessage: RichMessageDto = {
+const mockTextMessage: RichMessageDto & TextMessageDto = {
   id: 'test-message-1',
   chatId: 'test-chat-1',
   role: 'assistant',
-  content: 'Hello, this is a test message',
+  text: 'Hello, this is a test message',
   timestamp: new Date('2025-01-01T12:00:00Z'),
   sequenceNumber: 1,
   messageType: 'text'
 };
 
-const mockReasoningMessage: RichMessageDto = {
+const mockReasoningMessage: RichMessageDto & { reasoning: string } = {
   id: 'test-message-2', 
   chatId: 'test-chat-1',
   role: 'assistant',
-  content: 'Let me think through this...',
+  reasoning: 'Let me think through this...',
   timestamp: new Date('2025-01-01T12:01:00Z'),
   sequenceNumber: 2,
   messageType: 'reasoning'
@@ -92,11 +92,11 @@ describe('MessageRouter Component Logic', () => {
 
   describe('Message Type Interface Validation', () => {
     test('RichMessageDto extends MessageDto correctly', () => {
-      const message: RichMessageDto = {
+      const message: RichMessageDto & TextMessageDto = {
         id: 'test',
         chatId: 'chat',
         role: 'assistant',
-        content: 'content',
+        text: 'content',
         timestamp: new Date(),
         sequenceNumber: 1,
         messageType: 'text'
@@ -107,11 +107,11 @@ describe('MessageRouter Component Logic', () => {
     });
 
     test('handles optional messageType field', () => {
-      const messageWithoutType: RichMessageDto = {
+      const messageWithoutType: RichMessageDto & TextMessageDto = {
         id: 'test',
         chatId: 'chat',
         role: 'assistant',
-        content: 'content',
+        text: 'content',
         timestamp: new Date(),
         sequenceNumber: 1
         // messageType is optional
