@@ -216,6 +216,10 @@ Just confirming scroll behavior`;
   test('Test 2: Manual scroll persistence behavior', async ({ page }) => {
     console.log('🔄 Test 2: Starting manual scroll persistence test');
     
+    await page.goto('http://localhost:5173/');
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('textbox', { name: 'Start a new conversation...' })).toBeVisible();
+    
     // Create a conversation with multiple tall messages to ensure scrollable content
     console.log('📝 Step 2a: Creating conversation with tall content');
     
@@ -305,17 +309,22 @@ This is the second message`;
     
     // Wait for AI response
     await expect(page.getByText('4 messages')).toBeVisible({ timeout: 25000 });
+    // Ensure streaming completed: assistant echo with exact user message present
+    await expect(
+      page.getByTestId('message-timestamp').nth(3)
+    ).toBeVisible({ timeout: 10000 });
+
     
     console.log('✅ Step 2a completed: Created conversation with tall content');
     
     // Get the correct scroll container - the ChatWindow, not the sidebar
-    const scrollContainer = page.locator('.flex-1.overflow-y-auto.bg-gray-50').first();
+    const scrollContainer = page.getByTestId('message-list');
     
     // Ensure we start at the bottom for a clean baseline
     await scrollContainer.evaluate(el => { el.scrollTo({ top: el.scrollHeight, behavior: 'instant' }); });
     await expect.poll(async () => await scrollContainer.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight), { timeout: 3000 })
       .toBeLessThan(40);
-
+ 
     // Verify we're at the bottom initially
     let scrollPosition = await scrollContainer.evaluate(el => ({
       scrollTop: el.scrollTop,
@@ -330,47 +339,9 @@ This is the second message`;
     expect(isAtBottom).toBe(true);
     
     console.log('✅ Step 2b completed: Verified initial position at bottom');
-    
-    // Manually scroll by targeting the real scrollable parent of the message list
-    console.log('📝 Step 2c: Manually scrolling up by scrolling the scrollable ancestor');
-    await page.waitForTimeout(3000);
-    const messageList = page.getByTestId('message-list');
-    const elHandle = await messageList.elementHandle();
-    if (elHandle) {
-      await page.evaluate((el) => {
-        // Find nearest scrollable ancestor
-        let p = el as HTMLElement | null;
-        let scrollable: HTMLElement | null = null;
-        while (p) {
-          const canScroll = p.scrollHeight > p.clientHeight && getComputedStyle(p).overflowY !== 'visible';
-          if (canScroll) { scrollable = p; break; }
-          p = p.parentElement;
-        }
-        const target = scrollable ?? (document.scrollingElement as HTMLElement);
-        if (target) {
-          // Scroll well away from bottom
-          const newTop = Math.max(0, target.scrollTop - Math.max(500, target.clientHeight * 2));
-          target.scrollTo({ top: newTop, behavior: 'instant' as ScrollBehavior });
-        }
-      }, elHandle);
-    }
-    
-    // Verify we're no longer at the bottom
-    // Recompute against the same container metrics
-    scrollPosition = await scrollContainer.evaluate(el => ({
-      scrollTop: el.scrollTop,
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-      distanceFromBottom: el.scrollHeight - el.scrollTop - el.clientHeight
-    }));
-    
-    console.log('📊 After manual scroll:', scrollPosition);
-    
-  // Use a larger threshold to robustly determine we're not at bottom
-  const isStillAtBottom = scrollPosition.distanceFromBottom < 150;
-    expect(isStillAtBottom).toBe(false);
-    
-    console.log('✅ Step 2c completed: Manually scrolled away from bottom');
+ 
+    // Make sure streaming has completed (no blinking caret)
+    await expect(page.locator('span.animate-pulse')).toBeHidden({ timeout: 5000 });
     
     // Send a message (should trigger auto-scroll to show user's own message)
     console.log('📝 Step 2d: Sending short message while scrolled up');

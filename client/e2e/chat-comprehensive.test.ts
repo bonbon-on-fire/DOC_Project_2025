@@ -80,7 +80,7 @@ test.describe('Chat Application E2E Tests', () => {
     console.log('✅ Step 1f completed: Follow-up message sent');
     
     // Verify the follow-up message appears
-    await expect(page.getByText(testMessage2)).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.bg-blue-600 [data-testid="message-content"]').getByText(testMessage2).first()).toBeVisible({ timeout: 10000 });
     
     console.log('✅ Step 1g completed: Follow-up message visible');
     
@@ -184,8 +184,8 @@ test.describe('Chat Application E2E Tests', () => {
     await replyChatMessageInput.fill(replyMessage);
     await replyChatSendButton.click();
     
-    // Verify the reply message appears - scope to conversation area only
-    await expect(page.locator('div[class*="prose"]').getByText(replyMessage)).toBeVisible({ timeout: 15000 });
+    // Verify the reply message appears - scope to user bubble to avoid assistant echoes
+    await expect(page.locator('.bg-blue-600 [data-testid="message-content"]').getByText(replyMessage).first()).toBeVisible({ timeout: 15000 });
     
     console.log('✅ Step 2c completed: Reply message posted successfully');
     

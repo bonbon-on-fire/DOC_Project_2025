@@ -195,6 +195,25 @@ public class SseHandlerTests
         contents.Where(c => !string.IsNullOrEmpty(c)).Last().Should().Be("<|user_post|><|text_message|> plain");
     }
 
+    [Fact]
+    public async Task Emits_Multiple_Chunks_Before_Done()
+    {
+        // Arrange: force small chunks and a long message to produce multiple chunks deterministically
+        var handler = new TestSseMessageHandler { ChunkDelayMs = 0, WordsPerChunk = 3 };
+        using var invoker = new HttpMessageInvoker(handler);
+        var longMessage = string.Join(" ", Enumerable.Repeat("lorem", 30));
+        var req = BuildRequest(longMessage, stream: true);
+
+        // Act
+        var res = await invoker.SendAsync(req, default);
+        var text = await res.Content.ReadAsStringAsync();
+
+        // Assert
+        var dataLines = text.Split('\n').Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).ToList();
+        dataLines.Count.Should().BeGreaterThan(3, "expected multiple SSE chunks to be emitted");
+        text.Should().Contain("[DONE]");
+    }
+
     /// <summary>
     /// Gets the first JSON line from the SSE response.
     /// </summary>

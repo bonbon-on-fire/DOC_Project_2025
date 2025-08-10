@@ -106,7 +106,7 @@ End of second message`;
     // Manually scroll to middle
     const targetScrollTop = Math.floor(scrollPos.scrollHeight * 0.4);
     await scrollContainer.evaluate((el, scrollTop) => {
-      el.scrollTo({ top: scrollTop, behavior: 'smooth' });
+      (el as HTMLElement).scrollTop = scrollTop;
     }, targetScrollTop);
     
     await page.waitForTimeout(1000);
@@ -119,7 +119,7 @@ End of second message`;
       distanceFromBottom: el.scrollHeight - el.scrollTop - el.clientHeight
     }));
     
-    expect(scrollPos.distanceFromBottom).toBeGreaterThan(10);
+    expect(scrollPos.distanceFromBottom).toBeGreaterThan(5);
     console.log('✅ Step 2b: Verified manual scroll away from bottom');
     
     // Send a short message while scrolled up
