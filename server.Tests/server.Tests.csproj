@@ -13,6 +13,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.7" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\server\AIChat.Server.csproj" />

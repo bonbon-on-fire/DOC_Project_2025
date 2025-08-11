@@ -1,6 +1,8 @@
 using AchieveAi.LmDotnetTools.LmCore.Messages;
 using AIChat.Server.Models;
+using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace AIChat.Server.Services;
 
@@ -124,6 +126,17 @@ public class MessageDto
     public required string Role { get; set; }
     public DateTime Timestamp { get; set; }
     public int SequenceNumber { get; set; }
+}
+
+// Shared JSON serializer options with polymorphic configuration
+public static class MessageSerializationOptions
+{
+    public static readonly JsonSerializerOptions Default = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+    };
 }
 
 public class TextMessageDto : MessageDto

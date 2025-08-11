@@ -1,11 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using AIChat.Server.Data;
-using AIChat.Server.Models;
-using AchieveAi.LmDotnetTools.LmCore.Agents;
-using AchieveAi.LmDotnetTools.LmCore.Messages;
-using System.Runtime.CompilerServices;
-using System.Text;
 using Lib.AspNetCore.ServerSentEvents;
 using AIChat.Server.Services;
 using ChatDto = AIChat.Server.Services.ChatDto;

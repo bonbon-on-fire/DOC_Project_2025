@@ -6,7 +6,7 @@ import Page from './+page.svelte';
 describe('/+page.svelte', () => {
 	it('should render loading message', async () => {
 		render(Page);
-		
+
 		const loadingText = page.getByText('Loading AI Chat...');
 		await expect.element(loadingText).toBeInTheDocument();
 	});

@@ -1,7 +1,5 @@
 # Rich Message Rendering - Implementation Tasks
 
-<!-- markdownlint-disable MD024 -->
-
 ## Overview
 
 This document breaks down the Rich Message Rendering feature into specific, actionable tasks with clear acceptance criteria. Each task includes detailed requirements, testing criteria, and deliverables that developers can implement incrementally.

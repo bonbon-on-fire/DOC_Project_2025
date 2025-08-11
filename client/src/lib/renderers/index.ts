@@ -4,7 +4,12 @@
  */
 
 // Export the main RendererRegistry class and utilities
-export { RendererRegistry, rendererRegistry, getRenderer, registerRenderer } from './RendererRegistry.js';
+export {
+	RendererRegistry,
+	rendererRegistry,
+	getRenderer,
+	registerRenderer
+} from './RendererRegistry.js';
 
 // Re-export types for convenience
 export type { MessageRenderer, CustomRenderer } from '../types/index.js';
@@ -19,29 +24,29 @@ import { registerRenderer } from './RendererRegistry.js';
  * This function should be called during application initialization.
  */
 export function registerBuiltInRenderers(): void {
-  // Register TextRenderer for text message types
-  const textRenderer: MessageRenderer<MessageDto> = {
-    messageType: 'text'
-  };
-  
-  registerRenderer('text', textRenderer, true);
-  
-  console.info('Built-in message renderers registered successfully');
+	// Register TextRenderer for text message types
+	const textRenderer: MessageRenderer<MessageDto> = {
+		messageType: 'text'
+	};
+
+	registerRenderer('text', textRenderer, true);
+
+	console.info('Built-in message renderers registered successfully');
 }
 
 /**
  * Gets the Svelte component for a specific renderer type.
  * This is used by MessageRouter to dynamically load renderer components.
- * 
+ *
  * @param messageType - The message type to get component for
  * @returns Promise that resolves to the Svelte component
  */
 export async function getRendererComponent(messageType: string): Promise<any> {
-  switch (messageType) {
-    case 'text':
-      return (await import('../components/TextRenderer.svelte')).default;
-    default:
-      console.warn(`No component found for message type '${messageType}', using fallback`);
-      return null;
-  }
+	switch (messageType) {
+		case 'text':
+			return (await import('../components/TextRenderer.svelte')).default;
+		default:
+			console.warn(`No component found for message type '${messageType}', using fallback`);
+			return null;
+	}
 }
