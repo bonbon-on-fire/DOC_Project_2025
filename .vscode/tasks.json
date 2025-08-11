@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "build",
+            "label": "Build Server",
             "command": "dotnet",
             "type": "process",
             "args": [
@@ -14,7 +14,7 @@
             "problemMatcher": "$msCompile"
         },
         {
-            "label": "publish",
+            "label": "Publish Server",
             "command": "dotnet",
             "type": "process",
             "args": [
@@ -26,7 +26,7 @@
             "problemMatcher": "$msCompile"
         },
         {
-            "label": "watch",
+            "label": "Watch Server",
             "command": "dotnet",
             "type": "process",
             "args": [
@@ -35,7 +35,57 @@
                 "--project",
                 "${workspaceFolder}/server/AIChat.Server.csproj"
             ],
-            "problemMatcher": "$msCompile"
+            "isBackground": true,
+            "problemMatcher": {
+                "base": "$msCompile",
+                "background": {
+                    "activeOnStart": true,
+                    "endsPattern": "Now listening on: (https?:\\/\\/\\S+)"
+                }
+            }
+        },
+        {
+            "label": "Install Client Dependencies",
+            "command": "npm",
+            "type": "shell",
+            "args": [
+                "install"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/client"
+            },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build Client",
+            "command": "npm",
+            "type": "shell",
+            "args": [
+                "run",
+                "build"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/client"
+            },
+            "group": "build",
+            "problemMatcher": [],
+            "dependsOn": "Install Client Dependencies"
+        },
+        {
+            "label": "Dev Client",
+            "command": "npm",
+            "type": "shell",
+            "args": [
+                "run",
+                "dev"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/client"
+            },
+            "group": "build",
+            "problemMatcher": [],
+            "isBackground": true
         }
     ]
 }

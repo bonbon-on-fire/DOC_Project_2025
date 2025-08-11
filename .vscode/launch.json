@@ -2,10 +2,18 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Watch + Debug Server (dotnet watch)",
+      "type": "coreclr",
+      "request": "attach",
+      "processName": "dotnet",
+      "preLaunchTask": "Watch Server",
+    },
+    {
       "name": "Launch Server (HTTP)",
+      "preLaunchTask": "Build Server",
       "type": "coreclr",
       "request": "launch",
-      "program": "${workspaceFolder}/server/bin/Debug/net8.0/AIChat.Server.dll",
+      "program": "${workspaceFolder}/server/bin/Debug/net9.0/AIChat.Server.dll",
       "args": [],
       "cwd": "${workspaceFolder}/server",
       "stopAtEntry": false,
@@ -20,6 +28,7 @@
     },
     {
       "name": "Launch Client (Vite)",
+      "preLaunchTask": "Build Client",
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "npm",
@@ -39,6 +48,13 @@
       "name": "Launch Client and Server",
       "configurations": [
         "Launch Server (HTTP)",
+        "Launch Client (Vite)"
+      ]
+    },
+    {
+      "name": "Watch Server + Client",
+      "configurations": [
+        "Watch + Debug Server (dotnet watch)",
         "Launch Client (Vite)"
       ]
     }

@@ -1,5 +1,3 @@
-using Microsoft.EntityFrameworkCore;
-using AIChat.Server.Data;
 using AIChat.Server.Services;
 using AIChat.Server.Hubs;
 using AchieveAi.LmDotnetTools.LmConfig.Services;
@@ -14,6 +12,8 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Hosting;
 using AIChat.Server.Services.TestMode;
 using AIChat.Server.Logging;
+using AIChat.Server.Storage.Sqlite;
+using AIChat.Server.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,17 +22,37 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Configure Entity Framework
-if (builder.Environment.IsEnvironment("Test"))
+// Configure storage (replace EF)
+builder.Services.AddSingleton<SqliteConnectionFactory>(sp =>
 {
-    builder.Services.AddDbContext<AIChatDbContext>(options =>
-        options.UseInMemoryDatabase("AIChatTestDb"));
-}
-else
-{
-    builder.Services.AddDbContext<AIChatDbContext>(options =>
-        options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
-}
+    var env = sp.GetRequiredService<IHostEnvironment>();
+    var config = sp.GetRequiredService<IConfiguration>();
+
+    var connStr = config.GetConnectionString("DefaultConnection");
+    var keepRootOpen = false;
+
+    if (env.IsEnvironment("Test"))
+    {
+        // Default to in-memory shared cache if not overridden
+        if (string.IsNullOrWhiteSpace(connStr))
+        {
+            connStr = "Data Source=File:aichat_test?mode=memory&cache=shared";
+        }
+        keepRootOpen = true;
+    }
+    else if (string.IsNullOrWhiteSpace(connStr))
+    {
+        // Fallback default for non-Test when not supplied by config
+        connStr = "Data Source=aichat.db";
+    }
+
+    return new SqliteConnectionFactory(connStr!, keepRootOpen);
+});
+
+builder.Services.AddSingleton<ISqliteConnectionFactory>(sp => sp.GetRequiredService<SqliteConnectionFactory>());
+
+// Register IChatStorage
+builder.Services.AddScoped<IChatStorage, SqliteChatStorage>();
 
 // Add SignalR with increased timeout values
 builder.Services.AddSignalR(hubOptions =>
@@ -164,11 +184,6 @@ builder.Services.AddLogging(logging =>
 // Add Server-Sent Events services
 builder.Services.AddServerSentEvents();
 
-// Add custom SSE service
-
-// Add message sequence service
-builder.Services.AddScoped<IMessageSequenceService, MessageSequenceService>();
-
 // Add chat service
 builder.Services.AddScoped<IChatService, ChatService>();
 
@@ -181,26 +196,21 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// Apply database migrations or ensure clean DB in Test
+// Initialize database schema
 using (var scope = app.Services.CreateScope())
 {
-    var context = scope.ServiceProvider.GetRequiredService<AIChatDbContext>();
-    try
+    var env = app.Environment;
+    var factory = scope.ServiceProvider.GetRequiredService<SqliteConnectionFactory>();
+    if (env.IsEnvironment("Test"))
     {
-        if (app.Environment.IsEnvironment("Test"))
-        {
-            context.Database.EnsureDeleted();
-            context.Database.EnsureCreated();
-        }
-        else
-        {
-            context.Database.Migrate();
-        }
+        await TestDatabaseInitializer.InitializeAsync(factory);
     }
-    catch (Exception ex)
+    else
     {
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while initializing the database");
+        // Idempotent ensure schema and seed users
+        await using var conn = await factory.CreateOpenConnectionAsync();
+        await SchemaHelper.EnsureSchemaAsync(conn);
+        await SchemaHelper.SeedUsersAsync(conn);
     }
 }
 
@@ -222,3 +232,5 @@ app.MapServerSentEvents("/api/chat-sse");
 app.MapGet("/api/health", () => Results.Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow }));
 
 app.Run();
+
+public partial class Program { }

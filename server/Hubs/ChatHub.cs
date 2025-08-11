@@ -1,8 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
 using AIChat.Server.Services;
-using AIChat.Server.Data;
-using AIChat.Server.Models;
-using Microsoft.EntityFrameworkCore;
 using AchieveAi.LmDotnetTools.LmCore.Agents;
 using AchieveAi.LmDotnetTools.LmCore.Messages;
 using System.Collections.Immutable;
