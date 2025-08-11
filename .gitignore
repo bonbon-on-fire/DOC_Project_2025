@@ -106,13 +106,11 @@ tmp/
 temp/
 
 # Editor directories and files
-.vscode/*
+# .vscode/*
 !.vscode/extensions.json
 .idea
 *.suo
 *.ntvs*
-*.njsproj
-*.sln
 *.sw?
 
 # OS generated files

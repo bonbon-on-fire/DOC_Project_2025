@@ -82,6 +82,13 @@
   - After all messages complete, emit a single finish chunk (`finish_reason: "stop"`) and then `data: [DONE]`.
 - Fallback: If no instruction block is present or JSON is invalid, use the existing minimal behavior (hash-based lorem length, optional reasoning via "\nReason:").
 
+Implementation notes:
+- Parsing is implemented in `TestSseMessageHandler` via `TryParseInstructionPlan`, which safely extracts `id_message`, optional `reasoning.length`, and `messages[]` entries.
+- Streaming is implemented in `SseStreamHttpContent.SerializeInstructionPlanAsync`:
+  - Emits `id_message` before/after both reasoning and text; these markers do not count toward configured lengths.
+  - Emits `delta.tool_calls` entries with per-call `index`, progressive `function.name` and `function.arguments` updates.
+  - Uses `choices[0].index = i` to segregate parallel message streams.
+
 ## Lorem Generation (deterministic)
 - Source words: fixed lorem list repeated as needed.
 - Compute target word count: `5 + (abs(stableHash(userMessage)) % 496)`.

@@ -7,6 +7,47 @@ using System.Text.Json;
 
 namespace AIChat.Server.Services.TestMode;
 
+public sealed class InstructionPlan
+{
+    public string IdMessage { get; }
+    public int? ReasoningLength { get; }
+    public List<InstructionMessage> Messages { get; }
+
+    public InstructionPlan(string idMessage, int? reasoningLength, List<InstructionMessage> messages)
+    {
+        IdMessage = idMessage;
+        ReasoningLength = reasoningLength;
+        Messages = messages;
+    }
+}
+
+public sealed class InstructionMessage
+{
+    public int? TextLength { get; }
+    public List<InstructionToolCall>? ToolCalls { get; }
+
+    private InstructionMessage(int? textLength, List<InstructionToolCall>? toolCalls)
+    {
+        TextLength = textLength;
+        ToolCalls = toolCalls;
+    }
+
+    public static InstructionMessage ForText(int length) => new InstructionMessage(length, null);
+    public static InstructionMessage ForToolCalls(List<InstructionToolCall> calls) => new InstructionMessage(null, calls);
+}
+
+public sealed class InstructionToolCall
+{
+    public string Name { get; }
+    public string ArgsJson { get; }
+
+    public InstructionToolCall(string name, string argsJson)
+    {
+        Name = name;
+        ArgsJson = argsJson;
+    }
+}
+
 public sealed class SseStreamHttpContent : HttpContent
 {
     private static readonly JsonSerializerOptions _jsonSerializerOptions = new()
@@ -27,6 +68,7 @@ public sealed class SseStreamHttpContent : HttpContent
     private readonly bool _reasoningFirst;
     private readonly int _wordsPerChunk;
     private readonly int _chunkDelayMs;
+    private readonly InstructionPlan? _instructionPlan;
 
     public SseStreamHttpContent(
         string userMessage,
@@ -40,6 +82,23 @@ public sealed class SseStreamHttpContent : HttpContent
         _reasoningFirst = reasoningFirst;
         _wordsPerChunk = Math.Max(1, wordsPerChunk);
         _chunkDelayMs = Math.Max(0, chunkDelayMs);
+        _instructionPlan = null;
+
+        Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
+    }
+
+    public SseStreamHttpContent(
+        InstructionPlan instructionPlan,
+        string? model = null,
+        int wordsPerChunk = 5,
+        int chunkDelayMs = 100)
+    {
+        _userMessage = string.Empty;
+        _model = model;
+        _reasoningFirst = false;
+        _wordsPerChunk = Math.Max(1, wordsPerChunk);
+        _chunkDelayMs = Math.Max(0, chunkDelayMs);
+        _instructionPlan = instructionPlan;
 
         Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
     }
@@ -106,18 +165,27 @@ public sealed class SseStreamHttpContent : HttpContent
 
         // Removed initial empty chunk to avoid provider errors on null content
 
-        // New behavior: add user message at the start of the assistant message
+        if (_instructionPlan is not null)
+        {
+            await SerializeInstructionPlanAsync(_instructionPlan, id, created, WriteSseAsync, cancellationToken);
+            await WriteSseAsync(BuildFinishChunk(id, created));
+            await writer.WriteAsync("data: [DONE]\n\n");
+            await writer.FlushAsync(cancellationToken);
+            return;
+        }
+
+        // Legacy behavior
         if (!string.IsNullOrEmpty(_userMessage))
         {
             if (_reasoningFirst)
             {
                 var preReasoning = $"<|user_pre|><|reasoning|> {_userMessage}";
-                await WriteSseAsync(BuildChunk(id, created, content: null, reasoning: preReasoning));
+                await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: null, reasoning: preReasoning));
             }
             else
             {
                 var preContent = $"<|user_pre|><|text_message|> {_userMessage}";
-                await WriteSseAsync(BuildChunk(id, created, content: preContent, reasoning: null));
+                await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: preContent, reasoning: null));
             }
         }
 
@@ -126,7 +194,7 @@ public sealed class SseStreamHttpContent : HttpContent
             foreach (var token in GenerateReasoningTokens(_userMessage))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await WriteSseAsync(BuildChunk(id, created, content: null, reasoning: token));
+                await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: null, reasoning: token));
                 if (_chunkDelayMs > 0)
                 {
                     await Task.Delay(_chunkDelayMs, cancellationToken);
@@ -139,18 +207,17 @@ public sealed class SseStreamHttpContent : HttpContent
         foreach (var piece in GenerateLoremChunks(loremWordCount, _wordsPerChunk))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await WriteSseAsync(BuildChunk(id, created, content: piece, reasoning: null));
+            await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: piece, reasoning: null));
             if (_chunkDelayMs > 0)
             {
                 await Task.Delay(_chunkDelayMs, cancellationToken);
             }
         }
 
-        // Add user message at the end of the assistant message (as content)
         if (!string.IsNullOrEmpty(_userMessage))
         {
             var postContent = $"<|user_post|><|text_message|> {_userMessage}";
-            await WriteSseAsync(BuildChunk(id, created, content: postContent, reasoning: null));
+            await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: postContent, reasoning: null));
         }
 
         await WriteSseAsync(BuildFinishChunk(id, created));
@@ -158,7 +225,7 @@ public sealed class SseStreamHttpContent : HttpContent
         await writer.FlushAsync(cancellationToken);
     }
 
-    private object BuildChunk(string id, long created, string? content, string? reasoning)
+    private object BuildChunk(string id, long created, int indexOverride, string? content, string? reasoning, object? toolCallsDelta = null)
     {
         var delta = new Dictionary<string, object?>
         {
@@ -176,9 +243,14 @@ public sealed class SseStreamHttpContent : HttpContent
             delta["reasoning"] = reasoning;
         }
 
+        if (toolCallsDelta != null)
+        {
+            delta["tool_calls"] = toolCallsDelta;
+        }
+
         var choice = new Dictionary<string, object?>
         {
-            ["index"] = 0,
+            ["index"] = indexOverride,
             ["delta"] = delta,
             ["finishReason"] = null,
             ["nativeFinishReason"] = null,
@@ -223,6 +295,115 @@ public sealed class SseStreamHttpContent : HttpContent
 
         root["model"] = !string.IsNullOrWhiteSpace(_model) ? _model : "test-model";
         return root;
+    }
+
+    private async Task SerializeInstructionPlanAsync(
+        InstructionPlan plan,
+        string id,
+        long created,
+        Func<object, Task> writeSse,
+        CancellationToken cancellationToken)
+    {
+        for (int msgIndex = 0; msgIndex < plan.Messages.Count; msgIndex++)
+        {
+            var message = plan.Messages[msgIndex];
+            if (message.TextLength is int textLen)
+            {
+                // Reasoning first if configured at plan level
+                if (plan.ReasoningLength is int rlen && rlen > 0)
+                {
+                    await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: plan.IdMessage));
+                    foreach (var piece in GenerateLoremChunks(rlen, _wordsPerChunk))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: piece));
+                        if (_chunkDelayMs > 0)
+                        {
+                            await Task.Delay(_chunkDelayMs, cancellationToken);
+                        }
+                    }
+                    await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: plan.IdMessage));
+                }
+
+                // Text stream for this message
+                await writeSse(BuildChunk(id, created, msgIndex, content: plan.IdMessage, reasoning: null));
+                foreach (var piece in GenerateLoremChunks(Math.Max(0, textLen), _wordsPerChunk))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await writeSse(BuildChunk(id, created, msgIndex, content: piece, reasoning: null));
+                    if (_chunkDelayMs > 0)
+                    {
+                        await Task.Delay(_chunkDelayMs, cancellationToken);
+                    }
+                }
+                await writeSse(BuildChunk(id, created, msgIndex, content: plan.IdMessage, reasoning: null));
+            }
+            else if (message.ToolCalls is not null)
+            {
+                // Emit progressive tool call deltas
+                for (int toolIdx = 0; toolIdx < message.ToolCalls.Count; toolIdx++)
+                {
+                    var call = message.ToolCalls[toolIdx];
+                    // Name first
+                    var nameDelta = new[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["index"] = toolIdx,
+                            ["id"] = null,
+                            ["type"] = "function",
+                            ["function"] = new Dictionary<string, object?>
+                            {
+                                ["name"] = call.Name,
+                                ["arguments"] = string.Empty
+                            }
+                        }
+                    };
+                    await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: null, toolCallsDelta: nameDelta));
+
+                    // Arguments progressively in two chunks (simple)
+                    var args = call.ArgsJson ?? string.Empty;
+                    var split = Math.Max(1, args.Length / 2);
+                    var part1 = args.Substring(0, split);
+                    var part2 = args.Substring(split);
+
+                    var argsDelta1 = new[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["index"] = toolIdx,
+                            ["id"] = null,
+                            ["type"] = "function",
+                            ["function"] = new Dictionary<string, object?>
+                            {
+                                ["name"] = call.Name,
+                                ["arguments"] = part1
+                            }
+                        }
+                    };
+                    await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: null, toolCallsDelta: argsDelta1));
+
+                    if (!string.IsNullOrEmpty(part2))
+                    {
+                        var argsDelta2 = new[]
+                        {
+                            new Dictionary<string, object?>
+                            {
+                                ["index"] = toolIdx,
+                                ["id"] = null,
+                                ["type"] = "function",
+                                ["function"] = new Dictionary<string, object?>
+                                {
+                                    ["name"] = call.Name,
+                                    ["arguments"] = part2
+                                }
+                            }
+                        };
+                        await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: null, toolCallsDelta: argsDelta2));
+                    }
+                }
+            }
+        }
     }
 
     private static int CalculateStableWordCount(string seed)

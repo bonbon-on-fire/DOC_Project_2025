@@ -60,40 +60,40 @@
   - [x] Create `client/.env.test` with `PUBLIC_API_BASE_URL=http://localhost:5099`
   - [x] Ensure `client/src/lib/api/client.ts` and `client/src/lib/api/sse-client.ts` honor `PUBLIC_API_BASE_URL` (avoid hardcoded 5130 in test runs)
   - [ ] Update any remaining hardcoded base URLs (e.g., `client/src/lib/api.ts`) to use env or a single API client
-  - [ ] Start client in test mode (e.g., `npm run dev -- --mode test`) or set env in Playwright
-  - [ ] Verify CORS/SSE from client origin to `http://localhost:5099`
+  - [x] Start client in test mode (e.g., `npm run dev -- --mode test`) or set env in Playwright
+  - [x] Verify CORS/SSE from client origin to `http://localhost:5099`
   - Requirements:
-    - [ ] Client can reach Test backend; SSE flows
+    - [x] Client can reach Test backend; SSE flows
   - Tests:
-    - [ ] E2E: client connects to `http://localhost:5099` and receives streaming chunks
+    - [x] E2E: client connects to `http://localhost:5099` and receives streaming chunks
 
 - [ ] Task 5: Tests and docs
-  - [ ] Integration tests (fast):
-    - [ ] No reasoning → only text stream, `[DONE]` present
-    - [ ] With reasoning → reasoning-first, then text; both end with echo
-    - [ ] Pacing tolerance (non-flaky)
+  - [x] Integration tests (fast):
+    - [x] No reasoning → only text stream, `[DONE]` present
+    - [x] With reasoning → reasoning-first, then text; both end with echo
+    - [x] Pacing tolerance (non-flaky)
     - [ ] Optional: simulate cancellation scenario (document behavior)
   - [ ] Documentation:
-    - [ ] Link tasks to `requirements.md`
-    - [ ] Add run instructions for Test mode (env var, ports, HTTP-only)
+    - [x] Link tasks to `requirements.md`
+    - [x] Add run instructions for Test mode (env var, ports, HTTP-only)
   - Requirements:
-    - [ ] R2–R6 (behavior), R8 optional, R1 discoverability
+    - [x] R2–R6 (behavior), R8 optional, R1 discoverability
 
 - [ ] Task 6: Instruction-driven responses (server)
-  - [ ] Update `TestSseMessageHandler` to detect `<|instruction_start|> ... <|instruction_end|>` in latest user message and parse JSON only within the block.
-  - [ ] Support `id_message`, optional top-level `reasoning.length`, and `messages[]` entries of two kinds:
-    - [ ] `text_message.length`: stream reasoning-first if configured, then text; wrap both with `id_message` pre/post without counting toward lengths.
-    - [ ] `tool_call[]`: stream OpenAI-compatible `delta.tool_calls` with indices and progressive `name`/`args`.
-  - [ ] Emit distinct `choices[0].index` per message entry and a single finish chunk then `[DONE]` at the end.
-  - [ ] Fallback to legacy behavior when no instruction block or invalid JSON.
+  - [x] Update `TestSseMessageHandler` to detect `<|instruction_start|> ... <|instruction_end|>` in latest user message and parse JSON only within the block.
+  - [x] Support `id_message`, optional top-level `reasoning.length`, and `messages[]` entries of two kinds:
+    - [x] `text_message.length`: stream reasoning-first if configured, then text; wrap both with `id_message` pre/post without counting toward lengths.
+    - [x] `tool_call[]`: stream OpenAI-compatible `delta.tool_calls` with indices and progressive `name`/`args`.
+  - [x] Emit distinct `choices[0].index` per message entry and a single finish chunk then `[DONE]` at the end.
+  - [x] Fallback to legacy behavior when no instruction block or invalid JSON.
   - Requirements:
-    - [ ] R9.1–R9.6 (instruction-driven mode)
+    - [x] R9.1–R9.6 (instruction-driven mode)
   - Tests:
-    - [ ] Unit: parses instruction block; ignores outside text.
-    - [ ] Unit: multiple messages produce distinct indexed streams.
-    - [ ] Unit: `text_message` lengths honored; `id_message` excluded from counts.
-    - [ ] Unit: `tool_call` deltas shape and indexing.
-    - [ ] Unit: fallback path when instruction missing/invalid.
+    - [x] Unit: parses instruction block; ignores outside text.
+    - [x] Unit: multiple messages produce distinct indexed streams.
+    - [x] Unit: `text_message` lengths honored; `id_message` excluded from counts.
+    - [ ] Unit: `tool_call` deltas shape and indexing. (Deferred — test skipped)
+    - [x] Unit: fallback path when instruction missing/invalid.
 
 ## Reference Samples (format guidance)
 

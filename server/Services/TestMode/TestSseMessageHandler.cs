@@ -56,16 +56,29 @@ public sealed class TestSseMessageHandler : HttpMessageHandler
                 ? modelProp.GetString()
                 : null;
 
-            string userMessage = ExtractLatestUserMessage(root) ?? string.Empty;
+            // Instruction-driven mode detection
+            var latest = ExtractLatestUserMessage(root) ?? string.Empty;
+            var (plan, fallbackMessage) = TryParseInstructionPlan(latest);
 
-            bool reasoningFirst = userMessage.Contains("\nReason:", StringComparison.Ordinal);
-
-            var content = new SseStreamHttpContent(
-                userMessage: userMessage,
-                model: model,
-                reasoningFirst: reasoningFirst,
-                wordsPerChunk: WordsPerChunk,
-                chunkDelayMs: ChunkDelayMs);
+            HttpContent content;
+            if (plan is not null)
+            {
+                content = new SseStreamHttpContent(
+                    instructionPlan: plan,
+                    model: model,
+                    wordsPerChunk: WordsPerChunk,
+                    chunkDelayMs: ChunkDelayMs);
+            }
+            else
+            {
+                bool reasoningFirst = fallbackMessage.Contains("\nReason:", StringComparison.Ordinal);
+                content = new SseStreamHttpContent(
+                    userMessage: fallbackMessage,
+                    model: model,
+                    reasoningFirst: reasoningFirst,
+                    wordsPerChunk: WordsPerChunk,
+                    chunkDelayMs: ChunkDelayMs);
+            }
 
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -99,5 +112,83 @@ public sealed class TestSseMessageHandler : HttpMessageHandler
             }
         }
         return latest;
+    }
+
+    private static (InstructionPlan? plan, string fallback) TryParseInstructionPlan(string userMessage)
+    {
+        const string startTag = "<|instruction_start|>";
+        const string endTag = "<|instruction_end|>";
+        var start = userMessage.IndexOf(startTag, StringComparison.Ordinal);
+        var end = userMessage.IndexOf(endTag, StringComparison.Ordinal);
+        if (start < 0 || end <= start)
+        {
+            return (null, userMessage);
+        }
+
+        var jsonSpan = userMessage.Substring(start + startTag.Length, end - (start + startTag.Length)).Trim();
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonSpan);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return (null, userMessage);
+            }
+
+            var idMessage = root.TryGetProperty("id_message", out var idEl) && idEl.ValueKind == JsonValueKind.String
+                ? idEl.GetString() ?? string.Empty
+                : string.Empty;
+            int? reasoningLen = null;
+            if (root.TryGetProperty("reasoning", out var reasonEl) && reasonEl.ValueKind == JsonValueKind.Object)
+            {
+                if (reasonEl.TryGetProperty("length", out var lenEl) && lenEl.ValueKind == JsonValueKind.Number && lenEl.TryGetInt32(out var len))
+                {
+                    reasoningLen = Math.Max(0, len);
+                }
+            }
+
+            var messages = new List<InstructionMessage>();
+            if (root.TryGetProperty("messages", out var msgsEl) && msgsEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in msgsEl.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object) continue;
+                    if (item.TryGetProperty("text_message", out var textEl) && textEl.ValueKind == JsonValueKind.Object)
+                    {
+                        if (textEl.TryGetProperty("length", out var lEl) && lEl.ValueKind == JsonValueKind.Number && lEl.TryGetInt32(out var tlen))
+                        {
+                            messages.Add(InstructionMessage.ForText(Math.Max(0, tlen)));
+                            continue;
+                        }
+                    }
+                    if (item.TryGetProperty("tool_call", out var toolEl) && toolEl.ValueKind == JsonValueKind.Array)
+                    {
+                        var calls = new List<InstructionToolCall>();
+                        foreach (var call in toolEl.EnumerateArray())
+                        {
+                            if (call.ValueKind != JsonValueKind.Object) continue;
+                            var name = call.TryGetProperty("name", out var nEl) && nEl.ValueKind == JsonValueKind.String ? (nEl.GetString() ?? string.Empty) : string.Empty;
+                            var argsObj = call.TryGetProperty("args", out var aEl) ? aEl : default;
+                            var argsJson = argsObj.ValueKind != JsonValueKind.Undefined ? argsObj.GetRawText() : "{}";
+                            calls.Add(new InstructionToolCall(name, argsJson));
+                        }
+                        messages.Add(InstructionMessage.ForToolCalls(calls));
+                        continue;
+                    }
+                }
+            }
+
+            if (messages.Count == 0)
+            {
+                return (null, userMessage);
+            }
+
+            var plan = new InstructionPlan(idMessage, reasoningLen, messages);
+            return (plan, userMessage);
+        }
+        catch
+        {
+            return (null, userMessage);
+        }
     }
 }

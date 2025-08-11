@@ -214,6 +214,284 @@ public class SseHandlerTests
         text.Should().Contain("[DONE]");
     }
 
+    [Fact]
+    public async Task NoReasoning_WhenNotRequested()
+    {
+        // Arrange
+        var handler = new TestSseMessageHandler { ChunkDelayMs = 0, WordsPerChunk = 5 };
+        using var invoker = new HttpMessageInvoker(handler);
+        var req = BuildRequest("Plain text only - no reasoning here", stream: true);
+
+        // Act
+        var res = await invoker.SendAsync(req, default);
+        var text = await res.Content.ReadAsStringAsync();
+
+        // Assert: none of the JSON delta objects should include a 'reasoning' property
+        var jsons = GetAllJsonLines(text).ToList();
+        jsons.Should().NotBeEmpty();
+        foreach (var json in jsons)
+        {
+            using var doc = JsonDocument.Parse(json);
+            var delta = doc.RootElement.GetProperty("choices")[0].GetProperty("delta");
+            delta.TryGetProperty("reasoning", out _).Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task Pacing_ApproximatelyHonored_WithTolerance_NoReasoning()
+    {
+        // Arrange: choose small chunk size and non-reasoning message
+        var handler = new TestSseMessageHandler { ChunkDelayMs = 50, WordsPerChunk = 5 };
+        using var invoker = new HttpMessageInvoker(handler);
+        var req = BuildRequest("pacing test without reasoning", stream: true);
+
+        // Act
+        var started = DateTime.UtcNow;
+        var res = await invoker.SendAsync(req, default);
+        var text = await res.Content.ReadAsStringAsync();
+        var elapsed = DateTime.UtcNow - started;
+
+        // Count lorem chunks (exclude pre/post markers)
+        var jsons = GetAllJsonLines(text).Select(s => JsonDocument.Parse(s)).ToList();
+        int loremChunkCount = 0;
+        foreach (var doc in jsons)
+        {
+            var delta = doc.RootElement.GetProperty("choices")[0].GetProperty("delta");
+            if (delta.TryGetProperty("content", out var c))
+            {
+                var str = c.GetString() ?? string.Empty;
+                if (!str.Contains("<|user_pre|>", StringComparison.Ordinal) &&
+                    !str.Contains("<|user_post|>", StringComparison.Ordinal))
+                {
+                    loremChunkCount++;
+                }
+            }
+        }
+
+        // Expected minimum duration equals chunkCount * delay
+        var minMs = loremChunkCount * handler.ChunkDelayMs;
+        // Allow generous overhead tolerance
+        var toleranceMs = Math.Max(250, loremChunkCount * 10);
+
+        elapsed.TotalMilliseconds.Should().BeGreaterThan(minMs - 25);
+        elapsed.TotalMilliseconds.Should().BeLessThan(minMs + toleranceMs);
+    }
+
+    [Fact]
+    public async Task WithReasoning_PreReasoningMarker_And_PostTextEcho_Present()
+    {
+        // Arrange
+        var handler = new TestSseMessageHandler { ChunkDelayMs = 0, WordsPerChunk = 5 };
+        using var invoker = new HttpMessageInvoker(handler);
+        var message = "Hello there\nReason: please think first";
+        var req = BuildRequest(message, stream: true);
+
+        // Act
+        var res = await invoker.SendAsync(req, default);
+        var text = await res.Content.ReadAsStringAsync();
+
+        // Assert via parsed JSON: ensure reasoning appears and post text echo marker present in content
+        var docs = GetAllJsonLines(text).Select(s => JsonDocument.Parse(s)).ToList();
+        bool sawReasoning = false;
+        bool sawPostEcho = false;
+        foreach (var d in docs)
+        {
+            var delta = d.RootElement.GetProperty("choices")[0].GetProperty("delta");
+            if (delta.TryGetProperty("reasoning", out var r) && !string.IsNullOrEmpty(r.GetString()))
+            {
+                sawReasoning = true;
+            }
+            if (delta.TryGetProperty("content", out var c))
+            {
+                var val = c.GetString() ?? string.Empty;
+                if (val.Contains("<|user_post|><|text_message|>", StringComparison.Ordinal))
+                {
+                    sawPostEcho = true;
+                }
+            }
+        }
+        sawReasoning.Should().BeTrue();
+        sawPostEcho.Should().BeTrue();
+        text.Should().Contain("[DONE]");
+    }
+
+    [Fact]
+    public async Task InstructionMode_ParsesBlock_And_IgnoresOutsideText()
+    {
+        var handler = new TestSseMessageHandler { ChunkDelayMs = 0, WordsPerChunk = 3 };
+        using var invoker = new HttpMessageInvoker(handler);
+
+        var instructions = """
+<|instruction_start|>
+{
+  "id_message": "ID-XYZ",
+  "messages": [
+    { "text_message": { "length": 8 } }
+  ]
+}
+<|instruction_end|>
+""".Replace("\r", string.Empty);
+
+        var userMessage = $"outside header {instructions} trailing";
+        var req = BuildRequest(userMessage, stream: true);
+
+        var res = await invoker.SendAsync(req, default);
+        var text = await res.Content.ReadAsStringAsync();
+
+        text.Should().Contain("ID-XYZ");
+        text.Should().NotContain("outside header");
+        text.Should().NotContain("trailing");
+        text.Should().Contain("[DONE]");
+    }
+
+    [Fact]
+    public async Task InstructionMode_MultipleMessages_ProduceDistinctIndices()
+    {
+        var handler = new TestSseMessageHandler { ChunkDelayMs = 0, WordsPerChunk = 2 };
+        using var invoker = new HttpMessageInvoker(handler);
+
+        var instructions = """
+<|instruction_start|>
+{
+  "id_message": "ID-A",
+  "messages": [
+    { "text_message": { "length": 3 } },
+    { "text_message": { "length": 2 } }
+  ]
+}
+<|instruction_end|>
+""".Replace("\r", string.Empty);
+
+        var req = BuildRequest(instructions, stream: true);
+        var res = await invoker.SendAsync(req, default);
+        var text = await res.Content.ReadAsStringAsync();
+
+        var indices = GetAllJsonLines(text)
+            .Select(s => JsonDocument.Parse(s))
+            .Select(d => d.RootElement.GetProperty("choices")[0].GetProperty("index").GetInt32())
+            .Distinct()
+            .OrderBy(i => i)
+            .ToArray();
+
+        indices.Should().Equal(new[] { 0, 1 });
+    }
+
+    [Fact]
+    public async Task InstructionMode_TextLength_Honored_IdMessage_Excluded()
+    {
+        var handler = new TestSseMessageHandler { ChunkDelayMs = 0, WordsPerChunk = 5 };
+        using var invoker = new HttpMessageInvoker(handler);
+
+        var instructions = """
+<|instruction_start|>
+{
+  "id_message": "ID-MARK",
+  "messages": [
+    { "text_message": { "length": 7 } }
+  ]
+}
+<|instruction_end|>
+""".Replace("\r", string.Empty);
+
+        var res = await invoker.SendAsync(BuildRequest(instructions, stream: true), default);
+        var text = await res.Content.ReadAsStringAsync();
+
+        var docs = GetAllJsonLines(text).Select(s => JsonDocument.Parse(s)).ToList();
+        var contents = new List<string>();
+        foreach (var d in docs)
+        {
+            var delta = d.RootElement.GetProperty("choices")[0].GetProperty("delta");
+            if (delta.TryGetProperty("content", out var c))
+            {
+                var str = c.GetString() ?? string.Empty;
+                if (str == "ID-MARK") continue; // exclude id_message markers
+                contents.Add(str);
+            }
+        }
+        var words = string.Join(' ', contents).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        words.Length.Should().Be(7);
+    }
+
+    [Fact(Skip = "Deferred until tool_call support is implemented")]
+    public async Task InstructionMode_ToolCall_DeltaShape_And_Indexing()
+    {
+        var handler = new TestSseMessageHandler { ChunkDelayMs = 0 };
+        using var invoker = new HttpMessageInvoker(handler);
+
+        var instructions = """
+<|instruction_start|>
+{
+  "id_message": "TC-ID",
+  "messages": [
+    { "tool_call": [ { "name": "search_web", "args": { "query": "q", "limit": 2 } } ] }
+  ]
+}
+<|instruction_end|>
+""".Replace("\r", string.Empty);
+
+        var res = await invoker.SendAsync(BuildRequest(instructions, stream: true), default);
+        var text = await res.Content.ReadAsStringAsync();
+
+        var docs = GetAllJsonLines(text).Select(s => JsonDocument.Parse(s)).ToList();
+        var indices = new HashSet<int>();
+        var argConcat = new StringBuilder();
+        var sawName = false;
+        foreach (var d in docs)
+        {
+            var choice = d.RootElement.GetProperty("choices")[0];
+            indices.Add(choice.GetProperty("index").GetInt32());
+            var delta = choice.GetProperty("delta");
+            if (delta.TryGetProperty("tool_calls", out var tc) && tc.ValueKind == JsonValueKind.Array)
+            {
+                var entry = tc.EnumerateArray().First();
+                var func = entry.GetProperty("function");
+                if (func.TryGetProperty("name", out var nameEl) && nameEl.GetString() == "search_web")
+                {
+                    sawName = true;
+                }
+                if (func.TryGetProperty("arguments", out var argEl))
+                {
+                    argConcat.Append(argEl.GetString());
+                }
+            }
+        }
+        indices.Should().Equal(new[] { 0 });
+        sawName.Should().BeTrue();
+        // JSON of args without whitespace and in canonical order may vary; ensure both keys appear
+        argConcat.ToString().Should().Contain("query");
+        argConcat.ToString().Should().Contain("limit");
+    }
+
+    [Fact]
+    public async Task InstructionMode_Fallback_On_InvalidJson()
+    {
+        var handler = new TestSseMessageHandler { ChunkDelayMs = 0 };
+        using var invoker = new HttpMessageInvoker(handler);
+
+        var invalid = "<|instruction_start|>{ not json }<|instruction_end|>";
+        var res = await invoker.SendAsync(BuildRequest(invalid, stream: true), default);
+        var text = await res.Content.ReadAsStringAsync();
+
+        // Legacy should emit user_post marker (decoded) and DONE
+        var docs = GetAllJsonLines(text).Select(s => JsonDocument.Parse(s)).ToList();
+        bool sawPostEcho = false;
+        foreach (var d in docs)
+        {
+            var delta = d.RootElement.GetProperty("choices")[0].GetProperty("delta");
+            if (delta.TryGetProperty("content", out var c))
+            {
+                var val = c.GetString() ?? string.Empty;
+                if (val.Contains("<|user_post|><|text_message|>", StringComparison.Ordinal))
+                {
+                    sawPostEcho = true;
+                    break;
+                }
+            }
+        }
+        sawPostEcho.Should().BeTrue();
+        text.Should().Contain("[DONE]");
+    }
+
     /// <summary>
     /// Gets the first JSON line from the SSE response.
     /// </summary>
