@@ -166,10 +166,8 @@ public sealed class SseStreamHttpContent : HttpContent
             ["reasoning_details"] = Array.Empty<object>()
         };
 
-        if (content != null)
-        {
-            delta["content"] = content;
-        }
+        // Always include a content field. Some upstream parsers throw if it is missing/null.
+        delta["content"] = content ?? string.Empty;
 
         if (reasoning != null)
         {

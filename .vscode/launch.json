@@ -27,6 +27,25 @@
       "envFile": "${workspaceFolder}/.env"
     },
     {
+      "name": "Launch Server (HTTP) Test",
+      "preLaunchTask": "Build Server",
+      "type": "coreclr",
+      "request": "launch",
+      "program": "${workspaceFolder}/server/bin/Debug/net9.0/AIChat.Server.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/server",
+      "stopAtEntry": false,
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\\\[\\\\d+\\\\]:\\\\s+Now listening on: (https?://\\\\S+)"
+      },
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Test",
+        "LLM_API_KEY": "DUMMY"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
       "name": "Launch Client (Vite)",
       "preLaunchTask": "Build Client",
       "type": "node",

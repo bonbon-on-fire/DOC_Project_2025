@@ -37,7 +37,7 @@
 		"@types/better-sqlite3": "^7.6.12",
 		"@types/node": "^24.2.0",
 		"@vitest/browser": "^3.2.3",
-        "drizzle-kit": "^0.31.4",
+		"drizzle-kit": "^0.31.4",
 		"eslint": "^9.18.0",
 		"eslint-config-prettier": "^10.0.1",
 		"eslint-plugin-svelte": "^3.0.0",
@@ -66,23 +66,22 @@
 		"drizzle-orm": "^0.40.0",
 		"dompurify": "^3.1.6",
 		"marked": "^16.0.0"
+	},
+	"overrides": {
+		"esbuild": "^0.25.8",
+		"cookie": "^0.7.0",
+		"@esbuild-kit/core-utils": {
+			"esbuild": "^0.25.8"
+		},
+		"@esbuild-kit/esm-loader": {
+			"@esbuild-kit/core-utils": "^3.3.2",
+			"esbuild": "^0.25.8"
+		},
+		"drizzle-kit": {
+			"esbuild": "^0.25.8"
+		},
+		"@sveltejs/kit": {
+			"cookie": "^0.7.0"
+		}
 	}
-  ,
-  "overrides": {
-    "esbuild": "^0.25.8",
-    "cookie": "^0.7.0",
-    "@esbuild-kit/core-utils": {
-      "esbuild": "^0.25.8"
-    },
-    "@esbuild-kit/esm-loader": {
-      "@esbuild-kit/core-utils": "^3.3.2",
-      "esbuild": "^0.25.8"
-    },
-    "drizzle-kit": {
-      "esbuild": "^0.25.8"
-    },
-    "@sveltejs/kit": {
-      "cookie": "^0.7.0"
-    }
-  }
 }

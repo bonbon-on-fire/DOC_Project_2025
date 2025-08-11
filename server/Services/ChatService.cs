@@ -171,7 +171,7 @@ public class ChatService : IChatService
             }
             var list = await _storage.ListChatMessagesOrderedAsync(chatId);
             var messages = list.Success
-                ? list.Messages.Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson)!).ToList()
+                ? list.Messages.Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!).ToList()
                 : new List<MessageDto>();
 
             return new ChatResult
@@ -439,6 +439,8 @@ public class ChatService : IChatService
 
         var responseBuffer = new StringBuilder();
         var hadAnyTextChunk = false;
+        var reasoningBuffer = new StringBuilder();
+        ReasoningVisibility? latestReasoningVisibility = null;
 
         await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
         {
@@ -462,6 +464,8 @@ public class ChatService : IChatService
                 var delta = reasoningUpdate.Reasoning;
                 if (!string.IsNullOrEmpty(delta))
                 {
+                    reasoningBuffer.Append(delta);
+                    latestReasoningVisibility = reasoningUpdate.Visibility;
                     if (ReasoningChunkReceived != null)
                     {
                         await ReasoningChunkReceived(new ReasoningStreamEvent(chatId, assistantMessageId, delta, reasoningUpdate.Visibility));
@@ -478,6 +482,8 @@ public class ChatService : IChatService
                 var delta = reasoning.Reasoning;
                 if (!string.IsNullOrEmpty(delta))
                 {
+                    reasoningBuffer.Append(delta);
+                    latestReasoningVisibility = reasoning.Visibility;
                     if (ReasoningChunkReceived != null)
                     {
                         await ReasoningChunkReceived(new ReasoningStreamEvent(chatId, assistantMessageId, delta, reasoning.Visibility));
@@ -505,6 +511,36 @@ public class ChatService : IChatService
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Non-streaming fallback failed for chat {ChatId}", chatId);
+            }
+        }
+
+        // Persist accumulated reasoning (if any) as a separate message
+        if (reasoningBuffer.Length > 0)
+        {
+            var seqAlloc = await _storage.AllocateSequenceAsync(chatId);
+            if (seqAlloc.Success)
+            {
+                var reasoningDto = new ReasoningMessageDto
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    ChatId = chatId,
+                    Role = "assistant",
+                    Timestamp = init.AssistantTimestamp,
+                    SequenceNumber = seqAlloc.NextSequence,
+                    Reasoning = reasoningBuffer.ToString(),
+                    Visibility = latestReasoningVisibility ?? ReasoningVisibility.Plain
+                };
+                var reasoningRecord = new MessageRecord
+                {
+                    Id = reasoningDto.Id,
+                    ChatId = chatId,
+                    Role = reasoningDto.Role,
+                    Kind = "reasoning",
+                    TimestampUtc = reasoningDto.Timestamp,
+                    SequenceNumber = reasoningDto.SequenceNumber,
+                    MessageJson = JsonSerializer.Serialize<MessageDto>(reasoningDto)
+                };
+                await _storage.InsertMessageAsync(reasoningRecord);
             }
         }
 
@@ -547,8 +583,10 @@ public class ChatService : IChatService
             cancellationToken: cancellationToken);
         _logger.LogInformation("Received response from LLM for existing chat {ChatId}", chatId);
 
-        var responseBuffer = new StringBuilder();
+        var textMessageBuffer = new StringBuilder();
         var hadAnyTextChunk = false;
+        var reasoningBuffer = new StringBuilder();
+        ReasoningVisibility? latestReasoningVisibility = null;
 
         await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
         {
@@ -558,11 +596,16 @@ public class ChatService : IChatService
                 if (!string.IsNullOrEmpty(content))
                 {
                     yield return content;
-                    responseBuffer.Append(content);
+                    textMessageBuffer.Append(content);
                     hadAnyTextChunk = true;
                     if (StreamChunkReceived != null)
                     {
-                        await StreamChunkReceived(new TextStreamEvent(chatId, assistantMessageId, content, false));
+                        await StreamChunkReceived(
+                            new TextStreamEvent(
+                                chatId,
+                                message.GenerationId ?? assistantMessageId,
+                                content,
+                                false));
                     }
                 }
             }
@@ -572,13 +615,25 @@ public class ChatService : IChatService
                 var delta = reasoningUpdate.Reasoning;
                 if (!string.IsNullOrEmpty(delta))
                 {
+                    reasoningBuffer.Append(delta);
+                    latestReasoningVisibility = reasoningUpdate.Visibility;
                     if (ReasoningChunkReceived != null)
                     {
-                        await ReasoningChunkReceived(new ReasoningStreamEvent(chatId, assistantMessageId, delta, reasoningUpdate.Visibility));
+                        await ReasoningChunkReceived(
+                            new ReasoningStreamEvent(chatId,
+                                message.GenerationId ?? assistantMessageId,
+                                delta,
+                                reasoningUpdate.Visibility));
                     }
+
                     if (SideChannelReceived != null)
                     {
-                        await SideChannelReceived(new ReasoningStreamEvent(chatId, assistantMessageId, delta, reasoningUpdate.Visibility));
+                        await SideChannelReceived(
+                            new ReasoningStreamEvent(
+                                chatId,
+                                message.GenerationId ?? assistantMessageId,
+                                delta,
+                                reasoningUpdate.Visibility));
                     }
                 }
             }
@@ -588,13 +643,25 @@ public class ChatService : IChatService
                 var delta = reasoning.Reasoning;
                 if (!string.IsNullOrEmpty(delta))
                 {
+                    reasoningBuffer.Append(delta);
+                    latestReasoningVisibility = reasoning.Visibility;
                     if (ReasoningChunkReceived != null)
                     {
-                        await ReasoningChunkReceived(new ReasoningStreamEvent(chatId, assistantMessageId, delta, reasoning.Visibility));
+                        await ReasoningChunkReceived(
+                            new ReasoningStreamEvent(
+                                chatId,
+                                message.GenerationId ?? assistantMessageId,
+                                delta,
+                                reasoning.Visibility));
                     }
                     if (SideChannelReceived != null)
                     {
-                        await SideChannelReceived(new ReasoningStreamEvent(chatId, assistantMessageId, delta, reasoning.Visibility));
+                        await SideChannelReceived(
+                            new ReasoningStreamEvent(
+                                chatId,
+                                message.GenerationId ?? assistantMessageId,
+                                delta,
+                                reasoning.Visibility));
                     }
                 }
             }
@@ -609,7 +676,7 @@ public class ChatService : IChatService
                 var fullText = string.Join("", messages.OfType<TextMessage>().Select(m => m.Text));
                 if (!string.IsNullOrEmpty(fullText))
                 {
-                    responseBuffer.Append(fullText);
+                    textMessageBuffer.Append(fullText);
                 }
             }
             catch (Exception ex)
@@ -618,15 +685,64 @@ public class ChatService : IChatService
             }
         }
 
+        // Persist accumulated reasoning (if any) as a separate message
+        if (reasoningBuffer.Length > 0)
+        {
+            var seqAlloc = await _storage.AllocateSequenceAsync(chatId);
+            if (seqAlloc.Success)
+            {
+                var reasoningDto = new ReasoningMessageDto
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    ChatId = chatId,
+                    Role = "assistant",
+                    Timestamp = DateTime.UtcNow,
+                    SequenceNumber = seqAlloc.NextSequence,
+                    Reasoning = reasoningBuffer.ToString(),
+                    Visibility = latestReasoningVisibility ?? ReasoningVisibility.Plain
+                };
+                var reasoningRecord = new MessageRecord
+                {
+                    Id = reasoningDto.Id,
+                    ChatId = chatId,
+                    Role = reasoningDto.Role,
+                    Kind = "reasoning",
+                    TimestampUtc = reasoningDto.Timestamp,
+                    SequenceNumber = reasoningDto.SequenceNumber,
+                    MessageJson = JsonSerializer.Serialize<MessageDto>(reasoningDto)
+                };
+                await _storage.InsertMessageAsync(reasoningRecord);
+            }
+        }
+
+        // Preserve the originally reserved timestamp and sequence number for the assistant message
+        DateTime preservedTimestamp = DateTime.UtcNow;
+        int preservedSequence = 0;
+        try
+        {
+            var existing = await _storage.GetMessageByIdAsync(assistantMessageId);
+            if (existing.Success && existing.Message != null)
+            {
+                var dto = JsonSerializer.Deserialize<MessageDto>(existing.Message.MessageJson);
+                if (dto != null)
+                {
+                    preservedTimestamp = dto.Timestamp;
+                    preservedSequence = dto.SequenceNumber;
+                }
+            }
+        }
+        catch { /* best-effort preserve; fallback to defaults above */ }
+
         var finalDto = new TextMessageDto
         {
             Id = assistantMessageId,
             ChatId = chatId,
             Role = "assistant",
-            Timestamp = DateTime.UtcNow,
-            SequenceNumber = await _storage.AllocateSequenceAsync(chatId).ContinueWith(t => t.Result.NextSequence),
-            Text = responseBuffer.ToString()
+            Timestamp = preservedTimestamp,
+            SequenceNumber = preservedSequence,
+            Text = textMessageBuffer.ToString()
         };
+
         await _storage.UpdateMessageJsonAsync(assistantMessageId, JsonSerializer.Serialize<MessageDto>(finalDto));
         await _storage.UpdateChatUpdatedAtAsync(chatId, DateTime.UtcNow);
 

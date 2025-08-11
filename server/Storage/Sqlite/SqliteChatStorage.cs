@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Data;
 using System.Text.Json;
+using AIChat.Server.Services;
 using Microsoft.Data.Sqlite;
 
 namespace AIChat.Server.Storage.Sqlite;
@@ -11,10 +12,7 @@ namespace AIChat.Server.Storage.Sqlite;
 public sealed class SqliteChatStorage : IChatStorage
 {
     private readonly ISqliteConnectionFactory _factory;
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-    };
+    private static readonly JsonSerializerOptions JsonOptions = MessageSerializationOptions.Default;
 
     public SqliteChatStorage(ISqliteConnectionFactory factory)
     {
