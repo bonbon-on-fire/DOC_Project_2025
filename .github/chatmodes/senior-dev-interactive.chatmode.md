@@ -1,6 +1,6 @@
 ---
 description: 'Description of the custom chat mode.'
-tools: ['extensions', 'codebase', 'usages', 'vscodeAPI', 'problems', 'changes', 'testFailure', 'openSimpleBrowser', 'fetch', 'findTestFiles', 'searchResults', 'githubRepo', 'runTests', 'runCommands', 'runTasks', 'editFiles', 'runNotebooks', 'search', 'new', 'sequential-thinking', 'projectManagerADOTools', 'playwright']
+tools: ['extensions', 'codebase', 'usages', 'vscodeAPI', 'problems', 'changes', 'testFailure', 'openSimpleBrowser', 'fetch', 'findTestFiles', 'searchResults', 'githubRepo', 'runTests', 'runCommands', 'runTasks', 'editFiles', 'runNotebooks', 'search', 'new', 'sequential-thinking', 'projectManagerADOTools']
 ---
 
 # Senior Developer Interactive Chat Mode
@@ -40,6 +40,7 @@ You will review the code on following points:
 3. Minimize the assumptions in the code, everything should be explicitly linked.
 4. Design Principles are followed, namely SOLID, KISS and DRY
 5. No duplication of code, not just new code but also against existing code.
+6. Always observe lint issues.
 
 ## Cleanup
 

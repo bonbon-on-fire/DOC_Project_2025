@@ -4,7 +4,6 @@ import type {
 	CustomRenderer,
 	StreamingHandler,
 	StreamingUpdate,
-	ExpandableComponent,
 	MessageDto,
 	TextMessageDto
 } from './index.js';
@@ -176,54 +175,6 @@ describe('Core TypeScript Interfaces', () => {
 		});
 	});
 
-	describe('ExpandableComponent Interface', () => {
-		test('should accept valid ExpandableComponent implementation', () => {
-			const validComponent: ExpandableComponent = {
-				isCollapsible: true
-			};
-
-			expect(validComponent.isCollapsible).toBe(true);
-			expect(validComponent.onStateChange).toBeUndefined(); // Optional method
-		});
-
-		test('should accept implementation with optional onStateChange method', () => {
-			const stateChangeSpy = vi.fn();
-
-			const componentWithCallback: ExpandableComponent = {
-				isCollapsible: true,
-				onStateChange: stateChangeSpy
-			};
-
-			expect(componentWithCallback.isCollapsible).toBe(true);
-			expect(componentWithCallback.onStateChange).toBeDefined();
-
-			// Test that the optional method can be called
-			componentWithCallback.onStateChange?.(true);
-			expect(stateChangeSpy).toHaveBeenCalledWith(true);
-
-			componentWithCallback.onStateChange?.(false);
-			expect(stateChangeSpy).toHaveBeenCalledWith(false);
-		});
-
-		test('should support non-collapsible components', () => {
-			const nonCollapsibleComponent: ExpandableComponent = {
-				isCollapsible: false
-			};
-
-			expect(nonCollapsibleComponent.isCollapsible).toBe(false);
-		});
-
-		test('should enforce readonly isCollapsible property', () => {
-			const component: ExpandableComponent = {
-				isCollapsible: true
-			};
-
-			expect(component.isCollapsible).toBe(true);
-			// TypeScript should prevent reassignment (compile-time check)
-			// component.isCollapsible = false; // This would cause a compile error
-		});
-	});
-
 	describe('StreamingUpdate Interface', () => {
 		test('should accept valid StreamingUpdate objects', () => {
 			const basicUpdate: StreamingUpdate = {
@@ -260,9 +211,8 @@ describe('Core TypeScript Interfaces', () => {
 	describe('Integration Tests', () => {
 		test('should work together in a realistic scenario', () => {
 			// Mock a complete message renderer implementation
-			const textRenderer: MessageRenderer<TextMessageDto> & ExpandableComponent = {
+			const textRenderer: MessageRenderer<TextMessageDto> = {
 				messageType: 'text',
-				isCollapsible: false, // Text messages don't collapse
 				onExpand: vi.fn()
 			};
 
@@ -282,7 +232,6 @@ describe('Core TypeScript Interfaces', () => {
 
 			// Test that all components work together
 			expect(textRenderer.messageType).toBe('text');
-			expect(textRenderer.isCollapsible).toBe(false);
 
 			expect(textStreamingHandler.bufferSize).toBe(100);
 

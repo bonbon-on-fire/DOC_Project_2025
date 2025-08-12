@@ -9,9 +9,6 @@ export type { MessageRenderer, CustomRenderer } from './renderer.js';
 // Streaming interfaces
 export type { StreamingHandler, StreamingUpdate } from './streaming.js';
 
-// Expandable behavior interfaces
-export type { ExpandableComponent } from './expandable.js';
-
 // Message state interfaces
 export type { MessageState, MessageStates } from '../stores/messageState.js';
 

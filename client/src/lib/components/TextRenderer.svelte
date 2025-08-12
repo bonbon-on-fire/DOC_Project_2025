@@ -7,7 +7,6 @@
 
 	// Component props with proper TypeScript typing
 	export let message: TextMessageDto & RichMessageDto;
-	export let isLatest: boolean = false;
 	export let isLastAssistantMessage: boolean = false;
 
 	// Create event dispatcher for custom events
@@ -115,9 +114,7 @@
 						{#if safeContent}
 							{@html safeContent}
 						{:else}
-							<span class="empty-content" aria-label="Empty message">
-								<em>No content</em>
-							</span>
+							<span class="italic text-gray-400 dark:text-gray-500 text-[0.8rem]" aria-label="Empty message">No content</span>
 						{/if}
 					{/if}
 				</div>
@@ -148,15 +145,3 @@
 		{/if}
 	</div>
 </div>
-
-<style>
-	.empty-content {
-		color: rgb(156 163 175);
-		font-style: italic;
-		font-size: 0.8rem;
-	}
-
-	:global(.dark) .empty-content {
-		color: rgb(107 114 128);
-	}
-</style>

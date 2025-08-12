@@ -97,6 +97,16 @@
 				"/property:GenerateFullPaths=true",
 				"/consoleloggerparameters:NoSummary;ForceNoAlign"
 			]
+		},
+		{
+			"label": "Build Client",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"group": "build"
 		}
 	]
 }

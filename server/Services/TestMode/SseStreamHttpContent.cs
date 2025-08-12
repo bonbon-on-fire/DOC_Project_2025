@@ -68,7 +68,7 @@ public sealed class SseStreamHttpContent : HttpContent
         string userMessage,
         string? model = null,
         bool reasoningFirst = false,
-        int wordsPerChunk = 5,
+        int wordsPerChunk = 3,
         int chunkDelayMs = 100)
     {
         _userMessage = userMessage;
@@ -173,6 +173,7 @@ public sealed class SseStreamHttpContent : HttpContent
         {
             if (_reasoningFirst)
             {
+                await Task.Delay(3000);
                 var preReasoning = $"<|user_pre|><|reasoning|> {_userMessage}";
                 await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: null, reasoning: preReasoning));
             }
@@ -198,6 +199,7 @@ public sealed class SseStreamHttpContent : HttpContent
 
         var loremWordCount = CalculateStableWordCount(_userMessage);
 
+        await Task.Delay(3000);
         foreach (var piece in GenerateLoremChunks(loremWordCount, _wordsPerChunk))
         {
             cancellationToken.ThrowIfCancellationRequested();
