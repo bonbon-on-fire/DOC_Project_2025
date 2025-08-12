@@ -1,5 +1,6 @@
 {
     "dotrush.roslyn.projectOrSolutionFiles": [
         "b:\\sources\\DOC_Project_2025\\DOC_Project_2025.sln"
-    ]
+    ],
+    "dotnet.defaultSolution": "DOC_Project_2025.sln"
 }

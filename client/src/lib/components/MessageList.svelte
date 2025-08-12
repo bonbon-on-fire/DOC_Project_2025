@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { MessageDto, TextMessageDto, ReasoningMessageDto } from '$lib/types/chat';
-	import MessageBubble from './MessageBubble.svelte';
+	import MessageRouter from './MessageRouter.svelte';
 	export let messages: (MessageDto | TextMessageDto | ReasoningMessageDto)[] = [];
 
 	let chatContainer: HTMLDivElement;
@@ -28,10 +28,9 @@
 	{:else}
 		<!-- Messages -->
 		{#each messages as message, index (message.id)}
-			<MessageBubble
+			<MessageRouter
 				{message}
-				isLastAssistantMessage={message.role === 'assistant' && index === messages.length - 1}
-				on:message
+				isLatest={index === messages.length - 1}
 			/>
 		{/each}
 	{/if}

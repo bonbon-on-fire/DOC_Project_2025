@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Lib.AspNetCore.ServerSentEvents;
 using AIChat.Server.Services;
+using AIChat.Server.Models.SSE;
+using AIChat.Server.Extensions;
 using ChatDto = AIChat.Server.Services.ChatDto;
 using MessageDto = AIChat.Server.Services.MessageDto;
 
@@ -92,44 +94,6 @@ public class ChatController : ControllerBase
         return CreatedAtAction(nameof(GetChat), new { id = result.Chat!.Id }, result.Chat);
     }
 
-    // POST: api/chat/{chatId}/messages
-    [HttpPost("{chatId}/messages")]
-    public async Task<ActionResult<MessageDto>> SendMessage(
-        string chatId,
-        [FromBody] SendMessageRequest request)
-    {
-        // This endpoint provides an HTTP alternative to SignalR for sending messages
-        // Implementation mirrors ChatHub.SendMessage but returns HTTP responses
-        // For real-time updates, clients should use SignalR
-
-        // TODO: Get userId from authentication context
-        var userId = "user123"; // Placeholder
-
-        var sendRequest = new Services.SendMessageRequest
-        {
-            ChatId = chatId,
-            UserId = userId,
-            Message = request.Message
-        };
-
-        var result = await _chatService.SendMessageAsync(sendRequest);
-
-        if (!result.Success)
-        {
-            _logger.LogError("Error sending message to chat {ChatId}: {Error}", chatId, result.Error);
-            return StatusCode(500, new { Error = result.Error ?? "Failed to send message" });
-        }
-
-        return Ok(result.UserMessage);
-    }
-
-    private async Task WriteSseEvent(object data)
-    {
-        var json = System.Text.Json.JsonSerializer.Serialize(data);
-        await Response.WriteAsync($"data: {json}\n\n");
-        await Response.Body.FlushAsync();
-    }
-
     // DELETE: api/chat/{id}
     [HttpDelete("{id}")]
     public async Task<ActionResult> DeleteChat(string id)
@@ -142,16 +106,6 @@ public class ChatController : ControllerBase
         }
 
         return NoContent();
-    }
-
-    private static string GenerateChatTitle(string firstMessage)
-    {
-        // Generate a simple title from the first message
-        var title = firstMessage.Length > 50
-            ? firstMessage[..47] + "..."
-            : firstMessage;
-
-        return title;
     }
 
     // POST: api/chat/stream-sse
@@ -172,31 +126,17 @@ public class ChatController : ControllerBase
         // Generic side-channel forwarder
         async Task ForwardSideChannel(StreamChunkEvent ev)
         {
-            var chatId = ev.ChatId;
-            var messageId = ev.MessageId;
-            var kind = ev.Kind;
-            object payload = ev switch
-            {
-                ReasoningStreamEvent r => new { delta = r.Delta, visibility = r.Visibility?.ToString().ToLowerInvariant() },
-                TextStreamEvent t => new { delta = t.Delta, done = t.Done },
-                _ => new { delta = ev.Delta, done = ev.Done }
-            };
-
-            var envelope = new
-            {
-                chatId,
-                messageId,
-                sequenceId = currentAssistantSequenceNumber,
-                version = 1,
-                ts = DateTime.UtcNow,
-                kind,
-                payload
-            };
-            var sid = $"{chatId}:{messageId}:{currentAssistantSequenceNumber}";
+            var envelope = ev.ToSSEEnvelope(currentAssistantSequenceNumber);
+            var sid = $"{ev.ChatId}:{ev.MessageId}:{currentAssistantSequenceNumber}";
             await SendSseEvent("messageupdate", envelope, sid);
         }
 
-        Func<StreamChunkEvent, Task>? sideHandler = null;
+        async Task ForwardMessage(MessageEvent ev)
+        {
+            var envelope = ev.ToSSEEnvelope(currentAssistantSequenceNumber);
+            var sid = $"{ev.ChatId}:{ev.MessageId}:{currentAssistantSequenceNumber}";
+            await SendSseEvent("message", envelope, sid);
+        }
 
         try
         {
@@ -212,95 +152,49 @@ public class ChatController : ControllerBase
             // Get initialization metadata from service
             var initResult = await _chatService.PrepareUnifiedStreamChatAsync(streamRequest);
             currentChatId = initResult.ChatId;
-            currentAssistantMessageId = initResult.AssistantMessageId;
-            currentAssistantSequenceNumber = initResult.AssistantSequenceNumber;
 
             // Subscribe to side-channel after IDs are known
-            sideHandler = ForwardSideChannel;
-            _chatService.SideChannelReceived += sideHandler;
+            _chatService.MessageReceived += ForwardMessage;
+            _chatService.StreamChunkReceived += ForwardSideChannel;
 
             // Send INIT event (envelope optional kind: 'meta')
-            var initEnvelope = new
-            {
-                chatId = initResult.ChatId,
-                messageId = initResult.AssistantMessageId,
-                sequenceId = initResult.AssistantSequenceNumber,
-                version = 1,
-                ts = DateTime.UtcNow,
-                kind = "meta",
-                payload = new
-                {
-                    userMessageId = initResult.UserMessageId,
-                    assistantMessageId = initResult.AssistantMessageId,
-                    userTimestamp = initResult.UserTimestamp,
-                    assistantTimestamp = initResult.AssistantTimestamp,
-                    userSequenceNumber = initResult.UserSequenceNumber,
-                    assistantSequenceNumber = initResult.AssistantSequenceNumber
-                }
-            };
-            var initId = $"{initResult.ChatId}:{initResult.AssistantMessageId}:{initResult.AssistantSequenceNumber}";
+            var initEnvelope = SSEEventExtensions.CreateInitEnvelope(
+                initResult.ChatId,
+                initResult.UserMessageId,
+                initResult.UserTimestamp,
+                initResult.UserSequenceNumber);
+            var initId = $"{initResult.ChatId}<|>{initResult.UserMessageId}";
             await SendSseEvent("init", initEnvelope, initId);
 
             // Stream the assistant response using the assistant message created during initialization
-            await foreach (var chunk in _chatService.StreamAssistantResponseAsync(
+            await _chatService.StreamAssistantResponseAsync(
                 initResult.ChatId,
-                initResult.AssistantMessageId,
-                cancellationToken))
-            {
-                // Text update message
-                var updateEnvelope = new
-                {
-                    chatId = initResult.ChatId,
-                    messageId = initResult.AssistantMessageId,
-                    sequenceId = initResult.AssistantSequenceNumber,
-                    version = 1,
-                    ts = DateTime.UtcNow,
-                    kind = "text",
-                    payload = new { delta = chunk }
-                };
-                var upId = $"{initResult.ChatId}:{initResult.AssistantMessageId}:{initResult.AssistantSequenceNumber}";
-                await SendSseEvent("messageupdate", updateEnvelope, upId);
-            }
-
-            // Get final content of assistant message for complete event
-            var finalContent = await _chatService.GetMessageContentAsync(initResult.AssistantMessageId);
+                cancellationToken);
 
             // Send completion event with final content
-            var completeEnvelope = new
-            {
-                chatId = initResult.ChatId,
-                messageId = initResult.AssistantMessageId,
-                sequenceId = initResult.AssistantSequenceNumber,
-                version = 1,
-                ts = DateTime.UtcNow,
-                kind = "text",
-                payload = new { content = finalContent }
-            };
-            var cId = $"{initResult.ChatId}:{initResult.AssistantMessageId}:{initResult.AssistantSequenceNumber}";
-            await SendSseEvent("complete", completeEnvelope, cId);
+            var completeEnvelope = SSEEventExtensions.CreateStreamCompleteEnvelope(initResult.ChatId);
+            await SendSseEvent("complete", completeEnvelope, initId);
         }
         catch (Exception ex)
         {
             // Avoid passing exception object to logger in watch/Test to prevent formatter crashes
             _logger.LogError("Error streaming chat completion: {Type}: {Message}", ex.GetType().Name, ex.Message);
-            var errorEnvelope = new
-            {
-                chatId = currentChatId,
-                messageId = currentAssistantMessageId,
-                sequenceId = currentAssistantSequenceNumber,
-                version = 1,
-                ts = DateTime.UtcNow,
-                kind = "error",
-                payload = new { message = ex.Message }
-            };
-            await SendSseEvent("message", errorEnvelope, currentChatId != null && currentAssistantMessageId != null ? $"{currentChatId}:{currentAssistantMessageId}:{currentAssistantSequenceNumber}" : null);
+            var errorEnvelope = SSEEventExtensions.CreateErrorEnvelope(
+                currentChatId ?? "unknown",
+                currentAssistantMessageId,
+                currentAssistantSequenceNumber,
+                ex.Message);
+            await SendSseEvent(
+                "message",
+                errorEnvelope,
+                currentChatId != null && currentAssistantMessageId != null
+                    ? $"{currentChatId}<|>{currentAssistantMessageId}"
+                    : null);
         }
         finally
         {
-            if (sideHandler != null)
-            {
-                _chatService.SideChannelReceived -= sideHandler;
-            }
+            _chatService.MessageReceived -= ForwardMessage;
+            _chatService.StreamChunkReceived -= ForwardSideChannel;
         }
     }
 

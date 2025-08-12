@@ -36,6 +36,7 @@ VALUES ($id, $userId, $title, $createdAtUtc, $updatedAtUtc, $chatJson);";
             cmd.Parameters.AddWithValue("$chatJson", (object?)chatJson ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync(ct);
         }
+
         var record = new ChatRecord
         {
             Id = id,
@@ -122,7 +123,10 @@ FROM chats WHERE UserId=$userId ORDER BY UpdatedAtUtc DESC LIMIT $limit OFFSET $
         return (rows > 0, rows > 0 ? null : "NotFound");
     }
 
-    public async Task<(bool Success, string? Error)> UpdateChatUpdatedAtAsync(string chatId, DateTime updatedAtUtc, CancellationToken ct = default)
+    public async Task<(bool Success, string? Error)> UpdateChatUpdatedAtAsync(
+        string chatId,
+        DateTime updatedAtUtc,
+        CancellationToken ct = default)
     {
         await using var conn = await _factory.CreateOpenConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
@@ -133,7 +137,9 @@ FROM chats WHERE UserId=$userId ORDER BY UpdatedAtUtc DESC LIMIT $limit OFFSET $
         return (rows > 0, rows > 0 ? null : "NotFound");
     }
 
-    public async Task<(bool Success, string? Error, int NextSequence)> AllocateSequenceAsync(string chatId, CancellationToken ct = default)
+    public async Task<(bool Success, string? Error, int NextSequence)> AllocateSequenceAsync(
+        string chatId,
+        CancellationToken ct = default)
     {
         await using var conn = await _factory.CreateOpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
@@ -154,7 +160,9 @@ FROM chats WHERE UserId=$userId ORDER BY UpdatedAtUtc DESC LIMIT $limit OFFSET $
         }
     }
 
-    public async Task<(bool Success, string? Error, MessageRecord? Message)> InsertMessageAsync(MessageRecord message, CancellationToken ct = default)
+    public async Task<(bool Success, string? Error, MessageRecord? Message)> InsertMessageAsync(
+        MessageRecord message,
+        CancellationToken ct = default)
     {
         async Task<bool> TryInsertAsync(MessageRecord m)
         {
@@ -213,7 +221,9 @@ VALUES ($id, $chatId, $role, $kind, $timestampUtc, $seq, $json)";
         return (false, "UniqueConflict", null);
     }
 
-    public async Task<(bool Success, string? Error, IReadOnlyList<MessageRecord> Messages)> ListChatMessagesOrderedAsync(string chatId, CancellationToken ct = default)
+    public async Task<(bool Success, string? Error, IReadOnlyList<MessageRecord> Messages)> ListChatMessagesOrderedAsync(
+        string chatId,
+        CancellationToken ct = default)
     {
         await using var conn = await _factory.CreateOpenConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
@@ -237,7 +247,9 @@ VALUES ($id, $chatId, $role, $kind, $timestampUtc, $seq, $json)";
         return (true, null, list);
     }
 
-    public async Task<(bool Success, string? Error, MessageRecord? Message)> GetMessageByIdAsync(string messageId, CancellationToken ct = default)
+    public async Task<(bool Success, string? Error, MessageRecord? Message)> GetMessageByIdAsync(
+        string messageId,
+        CancellationToken ct = default)
     {
         await using var conn = await _factory.CreateOpenConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();

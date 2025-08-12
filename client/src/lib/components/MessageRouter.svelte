@@ -34,21 +34,31 @@
 			renderError = null;
 			fallbackToMessageBubble = false;
 
+			// Determine the effective message type with better debugging
+			const effectiveMessageType = message.messageType || 'text';
+			console.log(`MessageRouter resolving renderer for message ${message.id}:`, {
+				originalMessageType: message.messageType,
+				effectiveMessageType,
+				role: message.role,
+				hasReasoning: 'reasoning' in message,
+				hasText: 'text' in message
+			});
+
 			// Get renderer from registry
-			const renderer = getRenderer(message.messageType || 'text');
+			const renderer = getRenderer(effectiveMessageType);
 
 			// Try to get the actual Svelte component for this renderer
-			const RendererComponentModule = await getRendererComponent(message.messageType || 'text');
+			const RendererComponentModule = await getRendererComponent(effectiveMessageType);
 
 			if (RendererComponentModule && renderer.messageType !== 'fallback') {
 				console.info(
-					`Using ${renderer.messageType} renderer for message type '${message.messageType}'`
+					`Using ${renderer.messageType} renderer for message type '${effectiveMessageType}'`
 				);
 				RendererComponent = RendererComponentModule;
 				fallbackToMessageBubble = false;
 			} else {
 				console.warn(
-					`No specific renderer found for message type '${message.messageType}', using MessageBubble fallback`
+					`No specific renderer found for message type '${effectiveMessageType}', using MessageBubble fallback`
 				);
 				fallbackToMessageBubble = true;
 				RendererComponent = MessageBubble;

@@ -50,12 +50,6 @@ public sealed class InstructionToolCall
 
 public sealed class SseStreamHttpContent : HttpContent
 {
-    private static readonly JsonSerializerOptions _jsonSerializerOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-    };
-
     private static readonly JsonSerializerOptions _jsonSerializerOptionsWithReasoning = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -155,7 +149,7 @@ public sealed class SseStreamHttpContent : HttpContent
         {
             string json = JsonSerializer.Serialize(
                 payload,
-                _reasoningFirst ? _jsonSerializerOptionsWithReasoning : _jsonSerializerOptions);
+                _jsonSerializerOptionsWithReasoning);
 
             await writer.WriteAsync("data: ");
             await writer.WriteAsync(json);

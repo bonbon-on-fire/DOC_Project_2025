@@ -67,13 +67,6 @@ export class ApiClient {
 		});
 	}
 
-	async sendMessage(chatId: string, message: string): Promise<any> {
-		return this.request(`/api/chat/${chatId}/messages`, {
-			method: 'POST',
-			body: JSON.stringify({ message })
-		});
-	}
-
 	async streamChatCompletion(request: CreateChatRequest): Promise<Response> {
 		const url = this.baseUrl ? `${this.baseUrl}/api/chat/stream-sse` : `/api/chat/stream-sse`;
 

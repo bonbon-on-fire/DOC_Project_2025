@@ -29,7 +29,13 @@ export function registerBuiltInRenderers(): void {
 		messageType: 'text'
 	};
 
+	// Register ReasoningRenderer for reasoning message types
+	const reasoningRenderer: MessageRenderer<MessageDto> = {
+		messageType: 'reasoning'
+	};
+
 	registerRenderer('text', textRenderer, true);
+	registerRenderer('reasoning', reasoningRenderer, true);
 
 	console.info('Built-in message renderers registered successfully');
 }
@@ -45,6 +51,8 @@ export async function getRendererComponent(messageType: string): Promise<any> {
 	switch (messageType) {
 		case 'text':
 			return (await import('../components/TextRenderer.svelte')).default;
+		case 'reasoning':
+			return (await import('../components/ReasoningRenderer.svelte')).default;
 		default:
 			console.warn(`No component found for message type '${messageType}', using fallback`);
 			return null;

@@ -8,8 +8,8 @@ applyTo: '**'
 ## Client project
 
 Run `npm run dev` to start the client project and also watch for changes and rebuild/run them
-When executing in background, you should `cd client; npm run dev` to change directory into client and run the client project
-Run `Get-CimInstance Win32_Process | Where-Object {$_.Name -eq "node.exe"} | Where-Object {$_.CommandLine -like "* dev"}` to find the processes that are running in the background
+When executing in background, you should `cd client; npm run dev:test` to change directory into client and run the client project
+Run `Get-CimInstance Win32_Process | Where-Object {$_.Name -eq "node.exe"} | Where-Object {$_.CommandLine -like "* dev:test"}` to find the processes that are running in the background
 
 ## Server project
 

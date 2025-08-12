@@ -1,37 +1,39 @@
-// Svelte stores for chat state management
+// Svelte stores for chat state management - Handler-Based Architecture
 import { writable, derived, get } from 'svelte/store';
-import type { ChatDto, CreateChatRequest, TextMessageDto } from '$lib/types/chat';
+import type { ChatDto, CreateChatRequest } from '$lib/types/chat';
+import type { StreamingUIState } from '$lib/chat/types';
+import { HandlerBasedSSEOrchestrator } from '$lib/chat/handlerBasedOrchestrator';
 import { apiClient } from '$lib/api/client';
 
-// SSE envelope typing for current server format only
-type SsePayload = {
-	userMessageId?: string;
-	assistantMessageId?: string;
-	userTimestamp?: string;
-	assistantTimestamp?: string;
-	userSequenceNumber?: number;
-	assistantSequenceNumber?: number;
-	delta?: string;
-	content?: string;
-	visibility?: string;
-	message?: string;
-};
-
-// Helper function for safe property access
-function isObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null;
-}
-
-// Chat state
+// Chat state stores
 export const currentChatId = writable<string | null>(null);
 export const chats = writable<ChatDto[]>([]);
 export const currentChat = writable<ChatDto | null>(null);
 export const isLoading = writable(false);
 export const error = writable<string | null>(null);
-export const isStreaming = writable(false);
-export const currentStreamingMessage = writable('');
-export const currentReasoningMessage = writable('');
-export const currentReasoningVisibility = writable<string | null>(null);
+
+// Streaming state store - now properly typed
+export const streamingState = writable<StreamingUIState>({
+	isStreaming: false,
+	currentMessageId: null,
+	currentTextDelta: '',
+	currentReasoningDelta: '',
+	currentReasoningVisibility: null,
+	error: null
+});
+
+// Legacy stores for backward compatibility
+export const isStreaming = derived(streamingState, $state => {
+	console.log('[chat.ts] isStreaming derived:', $state.isStreaming);
+	return $state.isStreaming;
+});
+export const currentStreamingMessage = derived(streamingState, $state => {
+	console.log('[chat.ts] currentStreamingMessage derived:', $state.currentTextDelta);
+	return $state.currentTextDelta;
+});
+export const currentReasoningMessage = derived(streamingState, $state => $state.currentReasoningDelta);
+export const currentReasoningVisibility = derived(streamingState, $state => $state.currentReasoningVisibility);
+export const currentStreamingMessageId = derived(streamingState, $state => $state.currentMessageId);
 
 // User state (mock for now - will be replaced with actual auth)
 export const currentUser = writable({
@@ -39,6 +41,22 @@ export const currentUser = writable({
 	name: 'Demo User',
 	email: 'demo@example.com'
 });
+
+// Handler-Based SSE Orchestrator - implements new handler architecture
+let sseOrchestrator: HandlerBasedSSEOrchestrator | null = null;
+
+function getOrchestrator(): HandlerBasedSSEOrchestrator {
+	if (!sseOrchestrator) {
+		sseOrchestrator = new HandlerBasedSSEOrchestrator(
+			currentChat,
+			chats,
+			streamingState,
+			() => get(currentUser).id,
+			currentChatId
+		);
+	}
+	return sseOrchestrator;
+}
 
 // Derived store for current chat messages
 export const currentChatMessages = derived([currentChat], ([chat]) => {
@@ -74,8 +92,15 @@ export const chatActions = {
 			isLoading.set(true);
 			error.set(null);
 
-			// Load chat data
+			// Load chat data with all messages
 			const chat = await apiClient.getChat(chatId);
+			
+			// Ensure message timestamps are properly converted to Date objects
+			chat.messages = chat.messages.map((m) => ({ 
+				...m, 
+				timestamp: new Date(m.timestamp) 
+			}));
+			
 			currentChat.set(chat);
 			currentChatId.set(chatId);
 		} catch (err) {
@@ -120,176 +145,18 @@ export const chatActions = {
 
 	async streamNewChat(message: string, systemPrompt?: string): Promise<void> {
 		const user = get(currentUser);
-		let assistantMessageId = '';
 
 		try {
 			error.set(null);
-			isStreaming.set(true);
-			currentStreamingMessage.set('');
-			currentReasoningMessage.set('');
-			currentReasoningVisibility.set(null);
 
-			// Create request object
-			const request = {
-				userId: user.id,
-				message: message,
-				systemPrompt: systemPrompt
-			};
+			// Use the event-driven SSE orchestrator
+			const orchestrator = getOrchestrator();
+			await orchestrator.streamNewChat(message);
 
-			// Start streaming
-			const response = await apiClient.streamChatCompletion(request);
-
-			if (!response.body) {
-				throw new Error('No response body');
-			}
-
-			// Process SSE events
-			const reader = response.body.getReader();
-			const decoder = new TextDecoder();
-			let buffer = '';
-
-			try {
-				while (true) {
-					const { done, value } = await reader.read();
-
-					if (done) {
-						break;
-					}
-
-					buffer += decoder.decode(value, { stream: true });
-
-					// Process complete SSE events
-					const lines = buffer.split('\n\n');
-					buffer = lines.pop() || '';
-
-					for (const line of lines) {
-						{
-							// Parse SSE event (ignore leading id: lines)
-							const eventLines = line.split('\n');
-							let eventType = '';
-							let eventData = '';
-
-							for (const eventLine of eventLines) {
-								if (eventLine.startsWith('event:')) {
-									eventType = eventLine.substring(6).trim();
-								} else if (eventLine.startsWith('data:')) {
-									eventData = eventLine.substring(5).trim();
-								}
-							}
-
-							try {
-								const data: Record<string, unknown> = JSON.parse(eventData);
-
-								// Handle current server envelope format only
-								if (eventType && data && typeof data === 'object' && 'kind' in data) {
-									const kind = data.kind as string;
-									const payload = (
-										isObject(data.payload) ? (data.payload as SsePayload) : {}
-									) as SsePayload;
-
-									switch (eventType) {
-										case 'init': {
-											assistantMessageId = String(data.messageId);
-											const userMessage: TextMessageDto = {
-												id: payload.userMessageId || String(data.userMessageId),
-												chatId: String(data.chatId),
-												role: 'user',
-												text: message,
-												timestamp: new Date(payload.userTimestamp || String(data.ts)),
-												sequenceNumber: payload.userSequenceNumber ?? 0
-											};
-											const assistantPlaceholder: TextMessageDto = {
-												id: assistantMessageId,
-												chatId: String(data.chatId),
-												role: 'assistant',
-												text: '',
-												timestamp: new Date(payload.assistantTimestamp || String(data.ts)),
-												sequenceNumber:
-													payload.assistantSequenceNumber ?? (Number(data.sequenceId) || 1)
-											};
-
-											const newChat: ChatDto = {
-												id: String(data.chatId),
-												userId: user.id,
-												title: message.substring(0, 50) + (message.length > 50 ? '...' : ''),
-												messages: [userMessage, assistantPlaceholder],
-												createdAt: new Date(payload.userTimestamp || String(data.ts)),
-												updatedAt: new Date(payload.assistantTimestamp || String(data.ts))
-											};
-
-											chats.update((chats) => [newChat, ...chats]);
-											currentChatId.set(String(data.chatId));
-											currentChat.set(newChat);
-											isStreaming.set(true);
-											break;
-										}
-										case 'messageupdate': {
-											if (kind === 'text' && payload.delta) {
-												currentStreamingMessage.update((msg: string) => msg + payload.delta);
-											} else if (kind === 'reasoning' && payload.delta) {
-												currentReasoningMessage.update((msg: string) => msg + payload.delta);
-												if (payload.visibility) currentReasoningVisibility.set(payload.visibility);
-											}
-											break;
-										}
-										case 'complete': {
-											const finalContent =
-												kind === 'text' && typeof payload.content === 'string'
-													? payload.content
-													: get(currentStreamingMessage);
-											const chatId = get(currentChatId);
-											if (chatId && assistantMessageId) {
-												currentChat.update((chat) => {
-													if (!chat) return null;
-													const updatedMessages = chat.messages.map((msg) =>
-														msg.id === assistantMessageId ? { ...msg, text: finalContent } : msg
-													);
-													return { ...chat, messages: updatedMessages, updatedAt: new Date() };
-												});
-												chats.update((chatList) =>
-													chatList.map((chat) => {
-														if (chat.id !== chatId) return chat;
-														const updatedMessages = chat.messages.map((msg) =>
-															msg.id === assistantMessageId ? { ...msg, text: finalContent } : msg
-														);
-														return { ...chat, messages: updatedMessages, updatedAt: new Date() };
-													})
-												);
-												currentStreamingMessage.set('');
-												currentReasoningMessage.set('');
-												currentReasoningVisibility.set(null);
-											}
-											reader.releaseLock();
-											isStreaming.set(false);
-											return;
-										}
-										case 'message': {
-											if (kind === 'error') {
-												error.set(payload.message || 'Streaming error occurred');
-												reader.releaseLock();
-												isStreaming.set(false);
-												return;
-											}
-											break;
-										}
-									}
-								} else {
-									console.warn('Received SSE event in unexpected format:', { eventType, data });
-								}
-							} catch (parseError) {
-								console.error('Failed to parse SSE data:', parseError);
-							}
-						}
-					}
-				}
-			} finally {
-				reader.releaseLock();
-				isStreaming.set(false);
-			}
 		} catch (err) {
 			error.set(err instanceof Error ? err.message : 'Failed to stream chat completion');
 			console.error('Failed to stream chat completion:', err);
-			isStreaming.set(false);
+			streamingState.update(state => ({ ...state, isStreaming: false }));
 			throw err;
 		}
 	},
@@ -330,170 +197,22 @@ export const chatActions = {
 
 		try {
 			error.set(null);
-			isStreaming.set(true);
-			currentStreamingMessage.set('');
-			currentReasoningMessage.set('');
-			currentReasoningVisibility.set(null);
 
-			// Note: We'll add the user message when we receive the init event from the server
-			// This ensures we use the correct timestamp from the database
-
-			const request: CreateChatRequest = {
-				chatId: chatId,
-				userId: user.id,
-				message: message
-			};
-
-			const response = await apiClient.streamChatCompletion(request);
-
-			if (!response.body) {
-				throw new Error('No response body');
+			// Ensure we have the current chat loaded with all its messages
+			const existingChat = get(currentChat);
+			if (!existingChat || existingChat.id !== chatId) {
+				console.log('Reloading chat before streaming reply');
+				await chatActions.selectChat(chatId);
 			}
 
-			const reader = response.body.getReader();
-			const decoder = new TextDecoder();
-			let buffer = '';
-			let assistantMessageId = '';
+			// Use the event-driven SSE orchestrator
+			const orchestrator = getOrchestrator();
+			await orchestrator.streamReply(message, chatId);
 
-			try {
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
-
-					buffer += decoder.decode(value, { stream: true });
-					const lines = buffer.split('\n\n');
-					buffer = lines.pop() || '';
-
-					for (const line of lines) {
-						{
-							const eventLines = line.split('\n');
-							let eventType = '';
-							let eventData = '';
-							for (const eventLine of eventLines) {
-								if (eventLine.startsWith('event:')) {
-									eventType = eventLine.substring(6).trim();
-								} else if (eventLine.startsWith('data:')) {
-									eventData = eventLine.substring(5).trim();
-								}
-							}
-
-							try {
-								const data: Record<string, unknown> = JSON.parse(eventData);
-
-								// Handle current server envelope format only
-								if (eventType && data && typeof data === 'object' && 'kind' in data) {
-									const kind = String(data.kind);
-									const payload = (
-										isObject(data.payload) ? (data.payload as SsePayload) : {}
-									) as SsePayload;
-
-									switch (eventType) {
-										case 'init': {
-											assistantMessageId = String(data.messageId);
-											// Add user message with server timestamp
-											const userMessage: TextMessageDto = {
-												id: payload.userMessageId || String(data.userMessageId),
-												chatId: chatId,
-												role: 'user',
-												text: message,
-												timestamp: new Date(payload.userTimestamp || String(data.ts)),
-												sequenceNumber: payload.userSequenceNumber ?? 0
-											};
-											const assistantPlaceholder: TextMessageDto = {
-												id: assistantMessageId,
-												chatId: chatId,
-												role: 'assistant',
-												text: '',
-												timestamp: new Date(payload.assistantTimestamp || String(data.ts)),
-												sequenceNumber:
-													payload.assistantSequenceNumber ?? (Number(data.sequenceId) || 1)
-											};
-											currentChat.update((chat) =>
-												chat
-													? {
-															...chat,
-															messages: [...chat.messages, userMessage, assistantPlaceholder],
-															updatedAt: new Date(payload.assistantTimestamp || String(data.ts))
-														}
-													: null
-											);
-											chats.update((chatList) =>
-												chatList.map((chat) =>
-													chat.id === chatId
-														? {
-																...chat,
-																messages: [...chat.messages, userMessage, assistantPlaceholder],
-																updatedAt: new Date(payload.assistantTimestamp || String(data.ts))
-															}
-														: chat
-												)
-											);
-											break;
-										}
-										case 'messageupdate': {
-											if (kind === 'text' && payload.delta) {
-												currentStreamingMessage.update((msg) => msg + payload.delta);
-											} else if (kind === 'reasoning' && payload.delta) {
-												currentReasoningMessage.update((msg: string) => msg + payload.delta);
-												if (payload.visibility) currentReasoningVisibility.set(payload.visibility);
-											}
-											break;
-										}
-										case 'complete': {
-											const finalContent =
-												kind === 'text' && typeof payload.content === 'string'
-													? payload.content
-													: get(currentStreamingMessage);
-											currentChat.update((chat) => {
-												if (!chat) return null;
-												const updatedMessages = chat.messages.map((msg) =>
-													msg.id === assistantMessageId ? { ...msg, text: finalContent } : msg
-												);
-												return { ...chat, messages: updatedMessages, updatedAt: new Date() };
-											});
-											chats.update((chatList) =>
-												chatList.map((chat) => {
-													if (chat.id !== chatId) return chat;
-													const updatedMessages = chat.messages.map((msg) =>
-														msg.id === assistantMessageId ? { ...msg, text: finalContent } : msg
-													);
-													return { ...chat, messages: updatedMessages, updatedAt: new Date() };
-												})
-											);
-											currentStreamingMessage.set('');
-											currentReasoningMessage.set('');
-											currentReasoningVisibility.set(null);
-											reader.releaseLock();
-											isStreaming.set(false);
-											return;
-										}
-										case 'message': {
-											if (kind === 'error') {
-												error.set(payload.message || 'Streaming error occurred');
-												reader.releaseLock();
-												isStreaming.set(false);
-												return;
-											}
-											break;
-										}
-									}
-								} else {
-									console.warn('Received SSE event in unexpected format:', { eventType, data });
-								}
-							} catch (parseError) {
-								console.error('Failed to parse SSE data:', parseError);
-							}
-						}
-					}
-				}
-			} finally {
-				reader.releaseLock();
-				isStreaming.set(false);
-			}
 		} catch (err) {
 			error.set(err instanceof Error ? err.message : 'Failed to stream reply');
 			console.error('Failed to stream reply:', err);
-			isStreaming.set(false);
+			streamingState.update(state => ({ ...state, isStreaming: false }));
 		}
 	},
 
@@ -514,8 +233,23 @@ export const chatActions = {
 
 	// Cleanup
 	async cleanup(): Promise<void> {
+		// Cleanup orchestrator
+		if (sseOrchestrator) {
+			await sseOrchestrator.cleanup();
+			sseOrchestrator = null; // Reset so next getOrchestrator() creates fresh instance
+		}
+
+		// Reset state
 		currentChatId.set(null);
 		currentChat.set(null);
 		chats.set([]);
+		streamingState.set({
+			isStreaming: false,
+			currentMessageId: null,
+			currentTextDelta: '',
+			currentReasoningDelta: '',
+			currentReasoningVisibility: null,
+			error: null
+		});
 	}
 };
