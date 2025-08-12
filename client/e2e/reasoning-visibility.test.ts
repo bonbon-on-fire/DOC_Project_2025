@@ -2,9 +2,9 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Reasoning visibility (reasoning pills)', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto('http://localhost:5173/');
+		await page.goto('http://localhost:5173/chat');
 		await page.waitForLoadState('networkidle');
-		await expect(page.getByRole('textbox', { name: 'Start a new conversation...' })).toBeVisible();
+		await expect(page.getByPlaceholder('Start a new conversation...')).toBeVisible();
 	});
 
 	test('shows reasoning block during streaming when reasoning-first is triggered', async ({
@@ -14,7 +14,7 @@ test.describe('Reasoning visibility (reasoning pills)', () => {
 		const message = 'Trigger reasoning-first\nReason: please think out loud';
 
 		// Start new chat to trigger streaming
-		const input = page.getByRole('textbox', { name: 'Start a new conversation...' });
+		const input = page.getByPlaceholder('Start a new conversation...');
 		await input.fill(message);
 		await page.getByRole('button', { name: 'New Chat' }).click();
 

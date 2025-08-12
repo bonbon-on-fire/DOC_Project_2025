@@ -14,11 +14,11 @@ import { test, expect } from '@playwright/test';
 test.describe('Chat Application E2E Tests', () => {
 	test.beforeEach(async ({ page }) => {
 		// Navigate to the app and wait for it to be ready
-		await page.goto('http://localhost:5173/');
+		await page.goto('http://localhost:5173/chat');
 		await page.waitForLoadState('networkidle');
 
 		// Wait for the chat interface to be ready - use correct selector
-		await expect(page.getByRole('textbox', { name: 'Start a new conversation...' })).toBeVisible();
+		await expect(page.getByPlaceholder('Start a new conversation...')).toBeVisible();
 	});
 
 	test('Test 1: Create new conversation with full flow', async ({ page }) => {
@@ -26,7 +26,7 @@ test.describe('Chat Application E2E Tests', () => {
 
 		// Post new message
 		const testMessage1 = 'Hello, this is my first message in a new conversation';
-		const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
+		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		await chatInput.fill(testMessage1);
 		const sendButton = page.getByRole('button', { name: 'New Chat' });
 		await sendButton.click();
@@ -112,7 +112,7 @@ test.describe('Chat Application E2E Tests', () => {
 		const setupMessage2 =
 			'Setup message 2 for existing conversation test ' + Date.now() + ' second';
 
-		const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
+		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		const sendButton = page.getByRole('button', { name: 'New Chat' });
 
 		// Create first message
@@ -249,7 +249,7 @@ test.describe('Chat Application E2E Tests', () => {
 		await expect(sendButton).toBeDisabled();
 
 		// Try typing and then clearing - button should become disabled again
-		const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
+		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		await chatInput.fill('test');
 		await expect(sendButton).toBeEnabled();
 

@@ -11,9 +11,9 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Chat Scroll Behavior Tests (Working)', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto('http://localhost:5173/');
+		await page.goto('http://localhost:5173/chat');
 		await page.waitForLoadState('networkidle');
-		await expect(page.getByRole('textbox', { name: 'Start a new conversation...' })).toBeVisible();
+		await expect(page.getByPlaceholder('Start a new conversation...')).toBeVisible();
 	});
 
 	test('Test 1: Auto-scroll behavior verification', async ({ page }) => {
@@ -24,7 +24,7 @@ test.describe('Chat Scroll Behavior Tests (Working)', () => {
 ${'.\n'.repeat(30)}
 End of message`;
 
-		const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
+		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		await chatInput.fill(tallMessage);
 		const sendButton = page.getByRole('button', { name: 'New Chat' });
 		await sendButton.click();
@@ -67,7 +67,7 @@ End of message`;
 ${'.\n'.repeat(20)}
 End of first message`;
 
-		const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
+		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		await chatInput.fill(tallMessage1);
 		const sendButton = page.getByRole('button', { name: 'New Chat' });
 		await sendButton.click();
@@ -161,7 +161,7 @@ End of second message`;
 ${'.\n'.repeat(15)}
 End message 1`;
 
-		const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
+		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		await chatInput.fill(message1);
 		const sendButton = page.getByRole('button', { name: 'New Chat' });
 		await sendButton.click();

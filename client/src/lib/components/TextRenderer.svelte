@@ -91,7 +91,7 @@
 					class:text-yellow-800={message.role === 'system'}
 					class:dark\:text-yellow-200={message.role === 'system'}
 					class:dark\:text-gray-300={message.role !== 'system'}
-					data-testid="text-content"
+					data-testid="message-content"
 				>
 					{#if isLastAssistantMessage && $isStreaming && message.role === 'assistant'}
 						{#if $currentStreamingMessage?.trim()}

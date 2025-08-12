@@ -7,13 +7,13 @@ test('SSE flow sends fully decorated init event and handles streaming correctly'
 	page
 }) => {
 	// Navigate to the app
-	await page.goto('http://localhost:5173/');
+	await page.goto('http://localhost:5173/chat');
 
 	// Wait for the page to load
 	await page.waitForLoadState('networkidle');
 
 	// Find the new chat input field in the sidebar
-	const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
+	const chatInput = page.getByPlaceholder('Start a new conversation...');
 	await expect(chatInput).toBeVisible();
 
 	// Test message for SSE flow validation (unique to avoid selector collisions)
@@ -66,7 +66,7 @@ test('SSE flow handles error conditions gracefully', async ({ page }) => {
 	// For now, we'll just verify the basic error handling structure exists
 
 	// Navigate to the app
-	await page.goto('http://localhost:5173/');
+	await page.goto('http://localhost:5173/chat');
 
 	// Wait for the page to load
 	await page.waitForLoadState('networkidle');

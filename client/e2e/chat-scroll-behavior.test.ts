@@ -14,11 +14,11 @@ import { test, expect } from '@playwright/test';
 test.describe('Chat Scroll Behavior Tests', () => {
 	test.beforeEach(async ({ page }) => {
 		// Navigate to the app and wait for it to be ready
-		await page.goto('http://localhost:5173/');
+		await page.goto('http://localhost:5173/chat');
 		await page.waitForLoadState('networkidle');
 
 		// Wait for the chat interface to be ready
-		await expect(page.getByRole('textbox', { name: 'Start a new conversation...' })).toBeVisible();
+		await expect(page.getByPlaceholder('Start a new conversation...')).toBeVisible();
 	});
 
 	test('Test 1: Auto-scroll behavior when sending messages', async ({ page }) => {
@@ -76,7 +76,7 @@ Just say hi`;
 		console.log('📝 Step 1a: Creating conversation with tall message');
 
 		// Send the tall message
-		const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
+		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		await chatInput.fill(tallMessage1);
 		const sendButton = page.getByRole('button', { name: 'New Chat' });
 		await sendButton.click();
@@ -231,9 +231,9 @@ Just confirming scroll behavior`;
 	test('Test 2: Manual scroll persistence behavior', async ({ page }) => {
 		console.log('🔄 Test 2: Starting manual scroll persistence test');
 
-		await page.goto('http://localhost:5173/');
+		await page.goto('http://localhost:5173/chat');
 		await page.waitForLoadState('networkidle');
-		await expect(page.getByRole('textbox', { name: 'Start a new conversation...' })).toBeVisible();
+		await expect(page.getByPlaceholder('Start a new conversation...')).toBeVisible();
 
 		// Create a conversation with multiple tall messages to ensure scrollable content
 		console.log('📝 Step 2a: Creating conversation with tall content');
@@ -272,7 +272,7 @@ Just confirming scroll behavior`;
 This is the first message`;
 
 		// Send the tall message
-		const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
+		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		await chatInput.fill(tallMessage1);
 		const sendButton = page.getByRole('button', { name: 'New Chat' });
 		await sendButton.click();
@@ -498,7 +498,7 @@ This is the second message`;
 .
 First conversation content`;
 
-		const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
+		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		await chatInput.fill(tallMessage1);
 		const sendButton = page.getByRole('button', { name: 'New Chat' });
 		await sendButton.click();
@@ -676,7 +676,7 @@ This message will test streaming behavior`;
 
 		console.log('📝 Step 4a: Creating conversation for streaming test');
 
-		const chatInput = page.getByRole('textbox', { name: 'Start a new conversation...' });
+		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		await chatInput.fill(tallMessage);
 		const sendButton = page.getByRole('button', { name: 'New Chat' });
 		await sendButton.click();
