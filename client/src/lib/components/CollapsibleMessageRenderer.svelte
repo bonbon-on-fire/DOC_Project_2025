@@ -71,6 +71,7 @@
 					tabindex={collapsible ? 0 : -1}
 					aria-expanded={expanded}
 					aria-label={expanded ? `Collapse ${messageType}` : `Expand ${messageType}`}
+					data-testid={`${messageType.toLowerCase()}-toggle-button`}
 					disabled={!collapsible}
 				>
 					<svg class="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

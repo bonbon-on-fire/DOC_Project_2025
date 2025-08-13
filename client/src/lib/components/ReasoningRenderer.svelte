@@ -78,8 +78,10 @@
 		? reasoningText.substring(0, 60) + '...' 
 		: reasoningText;
 
-	// Forward child events from CollapsibleMessageRenderer
+	// Handle child events from CollapsibleMessageRenderer
 	function forwardStateChange(e: CustomEvent<{ expanded: boolean }>) {
+		// Update local expanded state when child changes it
+		expanded = e.detail.expanded;
 		dispatch('stateChange', e.detail);
 	}
 	function forwardToggle(e: CustomEvent<{ expanded: boolean }>) {
@@ -88,6 +90,7 @@
 </script>
 
 <!-- Reasoning message using reusable collapsible renderer -->
+<div data-component="reasoning-renderer" data-testid="reasoning-renderer">
 <CollapsibleMessageRenderer
 	{message}
 	{isLatest}
@@ -142,5 +145,6 @@
 		{/if}
 	</div>
 </CollapsibleMessageRenderer>
+</div>
 
 
