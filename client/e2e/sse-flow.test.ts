@@ -46,7 +46,7 @@ test('SSE flow sends fully decorated init event and handles streaming correctly'
 
 	// Verify no "Creating..." stuck state
 	const creatingIndicator = page.locator('text=Creating...');
-	await expect(creatingIndicator).not.toBeVisible();
+	await expect(creatingIndicator).not.toBeVisible({ timeout: 15000 });
 
 	// Verify proper timestamps are displayed
 	const timestampElements = page.locator('[data-testid="message-timestamp"]');

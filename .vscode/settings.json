@@ -4,6 +4,6 @@
     ],
     "dotnet.defaultSolution": "DOC_Project_2025.sln",
     "markdownlint.config": {
-        "MD007": false
+        "MD001": false
     }
 }

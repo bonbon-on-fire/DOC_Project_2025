@@ -157,6 +157,12 @@ export class HandlerBasedSSEOrchestrator {
 
 				if (done) {
 					console.log('SSE stream completed');
+					// Reset streaming state when stream naturally completes
+					this.streamingStateStore.update(state => ({
+						...state,
+						isStreaming: false,
+						error: null
+					}));
 					break;
 				}
 
