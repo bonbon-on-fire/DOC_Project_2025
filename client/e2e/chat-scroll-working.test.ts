@@ -63,9 +63,7 @@ End of message`;
 		console.log('🔄 Test 2: Testing manual scroll persistence');
 
 		// Create conversation with multiple tall messages
-		const tallMessage1 = `First Tall Message
-${'.\n'.repeat(20)}
-End of first message`;
+		const tallMessage1 = `First Tall Message ` + ('.\n'.repeat(20)) + ` End of first message`;
 
 		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		await chatInput.fill(tallMessage1);
@@ -80,9 +78,7 @@ End of first message`;
 		});
 
 		// Send another message to ensure scrollable content
-		const tallMessage2 = `Second Tall Message
-${'.\n'.repeat(15)}
-End of second message`;
+		const tallMessage2 = `Second Tall Message ` + ('.\n'.repeat(20)) + ` End of first message`;
 
 		const messageInput = page.getByRole('textbox', { name: 'Type your message...' });
 		await messageInput.fill(tallMessage2);

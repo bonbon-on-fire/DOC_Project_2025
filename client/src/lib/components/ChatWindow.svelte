@@ -20,56 +20,41 @@
 	// Track total message count for detecting new messages
 	$: totalMessages = $currentChatMessages.length;
 
-	// Watch for messages array changes to trigger scroll
+	// Watch for messages array changes to trigger scroll (less aggressive)
 	$: if ($currentChatMessages && $currentChatMessages.length > 0) {
-		// Trigger scroll when messages are loaded/updated with multiple attempts
+		// Trigger scroll when messages are loaded/updated but with fewer attempts
 		requestAnimationFrame(() => {
 			setTimeout(() => {
 				if (!userHasScrolled) {
 					scrollToBottom(true);
 				}
-			}, 100);
-
-			setTimeout(() => {
-				if (!userHasScrolled) {
-					scrollToBottom(true);
-				}
-			}, 300);
-
-			setTimeout(() => {
-				if (!userHasScrolled) {
-					scrollToBottom(true);
-				}
-			}, 500);
+			}, 200);
 		});
 	}
 
-	// Watch for streaming state changes
+	// Watch for streaming state changes (more conservative)
 	$: {
 		if ($isStreaming && !previousStreamingState) {
-			// If user is already near the bottom when streaming starts, keep them pinned
+			// Only auto-scroll during streaming if user is close to bottom and hasn't manually scrolled
 			const isNearBottom = messagesContainer
 				? messagesContainer.scrollHeight -
 						messagesContainer.scrollTop -
 						messagesContainer.clientHeight <
-					120
+					200
 				: false;
-			if (isNearBottom) {
-				setTimeout(() => scrollToBottom(true), 100);
+			if (isNearBottom && !userHasScrolled) {
+				setTimeout(() => scrollToBottom(), 200);
 			}
 		}
 		previousStreamingState = $isStreaming;
 	}
 
-	// Watch for conversation changes to reset scroll
+	// Watch for conversation changes to reset scroll (more conservative)
 	$: if ($currentChatId) {
 		userHasScrolled = false;
 		previousMessageCount = 0;
-		// Force scroll after conversation loads with multiple attempts
-		// Always reset to bottom when switching conversations
-		setTimeout(() => scrollToBottom(true), 200);
-		setTimeout(() => scrollToBottom(true), 500);
-		setTimeout(() => scrollToBottom(true), 1000);
+		// Single scroll attempt when switching conversations
+		setTimeout(() => scrollToBottom(true), 400);
 	}
 
 	const scrollToBottom = (force = false) => {
@@ -93,19 +78,23 @@
 	const handleScroll = () => {
 		if (!messagesContainer || !messagesContainer.scrollHeight || isAutoScrolling) return;
 
-		// Check if user is near the bottom (within 100px)
-		const isNearBottom =
+		// Check if user is near the bottom (within 200px - more generous threshold)
+		const distanceFromBottom = 
 			messagesContainer.scrollHeight -
 				messagesContainer.scrollTop -
-				messagesContainer.clientHeight <
-			100;
+				messagesContainer.clientHeight;
+		
+		const isNearBottom = distanceFromBottom < 200;
 
-		// Only update userHasScrolled if this is a user-initiated scroll
+		// Only update userHasScrolled if user has scrolled significantly away from bottom
+		// This prevents the auto-scroll from being too aggressive
 		userHasScrolled = !isNearBottom;
 	};
 
 	// Also listen for wheel/touchstart to mark manual interaction sooner
 	const markManualScroll = () => {
+		// Immediately mark that user has scrolled manually
+		// This prevents auto-scroll from interfering with user intent
 		userHasScrolled = true;
 	};
 
@@ -118,11 +107,9 @@
 			messagesContainer.addEventListener('wheel', markManualScroll, { passive: true });
 			messagesContainer.addEventListener('touchstart', markManualScroll, { passive: true });
 
-			// Force scroll to bottom after DOM is fully rendered
+			// Force scroll to bottom after DOM is fully rendered (single attempt)
 			requestAnimationFrame(() => {
-				setTimeout(() => scrollToBottom(true), 100);
 				setTimeout(() => scrollToBottom(true), 300);
-				setTimeout(() => scrollToBottom(true), 500);
 			});
 
 			// Cleanup on component destroy
@@ -134,7 +121,7 @@
 		}
 	});
 
-	// Auto-scroll when new messages arrive or during streaming
+	// Auto-scroll when new messages arrive or during streaming (simplified)
 	afterUpdate(() => {
 		// Auto-scroll in two scenarios:
 		// 1. New messages arrived (message count increased)
@@ -142,24 +129,15 @@
 		const hasNewMessages = totalMessages > previousMessageCount;
 
 		if (hasNewMessages || $isStreaming) {
-			// During streaming, keep snapping to bottom even if user scrolled slightly
-			const allowSnap = !$isStreaming
-				? !userHasScrolled
-				: messagesContainer?.scrollHeight -
-						messagesContainer?.scrollTop -
-						messagesContainer?.clientHeight <
-					300;
-			if (allowSnap) {
-				setTimeout(() => scrollToBottom(), 50);
-				setTimeout(() => scrollToBottom(), 200);
-				setTimeout(() => scrollToBottom(), 400);
+			// Only auto-scroll if user hasn't manually scrolled away
+			if (!userHasScrolled) {
+				setTimeout(() => scrollToBottom(), 100);
 			}
 		}
 
-		// If this is initial load (no previous messages), force scroll
+		// If this is initial load (no previous messages), force scroll once
 		if (totalMessages > 0 && previousMessageCount === 0) {
-			setTimeout(() => scrollToBottom(true), 300);
-			setTimeout(() => scrollToBottom(true), 600);
+			setTimeout(() => scrollToBottom(true), 400);
 		}
 
 		// Update previous message count
