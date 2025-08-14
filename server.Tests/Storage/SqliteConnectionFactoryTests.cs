@@ -1,7 +1,5 @@
-using System.Threading.Tasks;
 using AIChat.Server.Storage.Sqlite;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace AIChat.Server.Tests.Storage;

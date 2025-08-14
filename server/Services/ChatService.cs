@@ -425,7 +425,7 @@ public class ChatService : IChatService
         }
         
         var lmMessages = history.Select(ConvertToLmMessage).ToList();
-        var userMsgSequence = history.Count > 0 ? history.Max(m => m.SequenceNumber) + 1 : 1;
+        var userMsgSequence = history.Count > 0 ? history.Max(m => m.SequenceNumber) : 0;
 
         _logger.LogInformation("[DEBUG] Converted to {Count} LM messages", lmMessages.Count);
         foreach (var lmMsg in lmMessages)
@@ -468,10 +468,7 @@ public class ChatService : IChatService
         Type? lastFullMessageType = null;
         await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
         {
-            if (message.GetType() != lastFullMessageType)
-            {
-                fullMessageIndex++;
-            }
+            fullMessageIndex++;
 
             lastFullMessageType = message.GetType();
             var fullMessageId = message.GenerationId + $"-{fullMessageIndex:D3}";

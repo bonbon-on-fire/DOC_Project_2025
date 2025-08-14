@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
-using Serilog;
 
 namespace AIChat.Server.Controllers;
 

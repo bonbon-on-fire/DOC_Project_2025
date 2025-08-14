@@ -1,7 +1,5 @@
 using AchieveAi.LmDotnetTools.LmCore.Core;
 using AchieveAi.LmDotnetTools.LmCore.Messages;
-using AIChat.Server.Models;
-using ModelContextProtocol.Protocol;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;

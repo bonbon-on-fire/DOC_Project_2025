@@ -1,7 +1,5 @@
-using System;
 using System.Diagnostics;
 using System.Text;
-using Microsoft.Extensions.Logging;
 
 namespace AIChat.Server.Logging;
 

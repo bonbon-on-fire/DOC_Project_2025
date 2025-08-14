@@ -1,7 +1,4 @@
 using System.Net.Http.Json;
-using System.Text.Json;
-using System.Text.RegularExpressions;
-using AIChat.Server;
 using AIChat.Server.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;

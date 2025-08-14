@@ -8,8 +8,6 @@ using AchieveAi.LmDotnetTools.Misc.Configuration;
 using AchieveAi.LmDotnetTools.Misc.Http;
 using Lib.AspNetCore.ServerSentEvents;
 using AIChat.Server.Models;
-using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Hosting;
 using AIChat.Server.Services.TestMode;
 using AIChat.Server.Logging;
 using AIChat.Server.Storage.Sqlite;

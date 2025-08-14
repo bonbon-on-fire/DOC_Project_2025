@@ -4,6 +4,9 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AchieveAi.LmDotnetTools.LmCore.Utils;
+using AchieveAi.LmDotnetTools.OpenAIProvider.Agents;
+using AchieveAi.LmDotnetTools.OpenAIProvider.Models;
 
 namespace AIChat.Server.Services.TestMode;
 
@@ -50,12 +53,7 @@ public sealed class InstructionToolCall
 
 public sealed class SseStreamHttpContent : HttpContent
 {
-    private static readonly JsonSerializerOptions _jsonSerializerOptionsWithReasoning = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-        WriteIndented = false
-    };
+    private static readonly JsonSerializerOptions _jsonSerializerOptionsWithReasoning = OpenClient.S_jsonSerializerOptions;
 
     private readonly string _userMessage;
     private readonly string? _model;
@@ -159,145 +157,94 @@ public sealed class SseStreamHttpContent : HttpContent
 
         // Removed initial empty chunk to avoid provider errors on null content
 
+        var choices = Enumerable.Empty<Choice>();
+        var maxMessageIdx = 0;
         if (_instructionPlan is not null)
         {
-            await SerializeInstructionPlanAsync(_instructionPlan, id, created, WriteSseAsync, cancellationToken);
-            await WriteSseAsync(BuildFinishChunk(id, created));
-            await writer.WriteAsync("data: [DONE]\n\n");
-            await writer.FlushAsync(cancellationToken);
-            return;
+            choices = SerializeInstructionPlanAsync(_instructionPlan);
+            maxMessageIdx = _instructionPlan.Messages.Count - 1;
         }
-
-        // Legacy behavior
-        if (!string.IsNullOrEmpty(_userMessage))
+        else
         {
+            var reasoning = string.Empty;
+            var text = string.Empty;
+
+            if (!string.IsNullOrEmpty(_userMessage))
+            {
+                if (_reasoningFirst)
+                {
+                    reasoning = $"<|user_pre|><|reasoning|> {_userMessage}";
+                }
+
+                text = $"<|user_pre|><|text_message|> {_userMessage}";
+            }
+
             if (_reasoningFirst)
             {
-                await Task.Delay(3000);
-                var preReasoning = $"<|user_pre|><|reasoning|> {_userMessage}";
-                await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: null, reasoning: preReasoning));
+                reasoning += string.Join(" ", GenerateReasoningTokens(_wordsPerChunk));
+                reasoning += $"<|user_post|><|reasoning|> {_userMessage}";
             }
-            else
+
+            var loremWordCount = CalculateStableWordCount(_userMessage);
+            text += string.Join(" ", GenerateLoremChunks(loremWordCount, _wordsPerChunk));
+
+            if (!string.IsNullOrEmpty(_userMessage))
             {
-                var preContent = $"<|user_pre|><|text_message|> {_userMessage}";
-                await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: preContent, reasoning: null));
+                text += $"<|user_post|><|text_message|> {_userMessage}";
             }
-        }
 
-        if (_reasoningFirst)
-        {
-            foreach (var token in GenerateReasoningTokens(_userMessage, _wordsPerChunk))
+            if (reasoning.Length > 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: null, reasoning: token));
-                if (_chunkDelayMs > 0)
-                {
-                    await Task.Delay(_chunkDelayMs, cancellationToken);
-                }
+                choices = choices.Concat(ChunkReasoningText(0, reasoning, _wordsPerChunk));
             }
-        }
 
-        var loremWordCount = CalculateStableWordCount(_userMessage);
-
-        await Task.Delay(3000);
-        foreach (var piece in GenerateLoremChunks(loremWordCount, _wordsPerChunk))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: piece, reasoning: null));
-            if (_chunkDelayMs > 0)
+            if (text.Length > 0)
             {
-                await Task.Delay(_chunkDelayMs, cancellationToken);
+                choices = choices.Concat(ChunkTextMessage(0, text, _wordsPerChunk));
             }
+
+            maxMessageIdx = 0;
         }
 
-        if (!string.IsNullOrEmpty(_userMessage))
+        var gen_id = $"gen-{created}-{Guid.NewGuid().ToString("N")[..16]}";
+        choices = choices.Concat([BuildFinishChunk(maxMessageIdx)]);
+        foreach (var choice in choices)
         {
-            var postContent = $"<|user_post|><|text_message|> {_userMessage}";
-            await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: postContent, reasoning: null));
+            var responseMessage = new ChatCompletionResponse
+            {
+                Id = gen_id,
+                VarObject = "chat.completion.chunk",
+                Created = (int)created,
+                Model = _model ?? "test-model",
+                Choices = [ choice ]
+            };
+
+            await WriteSseAsync(responseMessage);
+            await Task.Delay(_chunkDelayMs, cancellationToken);
         }
 
-        await WriteSseAsync(BuildFinishChunk(id, created));
+
         await writer.WriteAsync("data: [DONE]\n\n");
         await writer.FlushAsync(cancellationToken);
     }
 
-    private object BuildChunk(string id, long created, int indexOverride, string? content, string? reasoning, object? toolCallsDelta = null)
+    private Choice BuildFinishChunk(int lastIdx)
     {
-        var delta = new Dictionary<string, object?>
+        return new Choice
         {
-            ["role"] = "assistant",
-            ["reasoning_details"] = Array.Empty<object>()
-        };
-
-        // Always include a content field. Some upstream parsers throw if it is missing/null.
-        delta["content"] = content ?? string.Empty;
-
-        if (reasoning != null)
-        {
-            delta["reasoning"] = reasoning;
-        }
-
-        if (toolCallsDelta != null)
-        {
-            delta["tool_calls"] = toolCallsDelta;
-        }
-
-        var choice = new Dictionary<string, object?>
-        {
-            ["index"] = indexOverride,
-            ["delta"] = delta,
-            ["finishReason"] = null,
-            ["nativeFinishReason"] = null,
-            ["logprobs"] = null
-        };
-
-        var root = new Dictionary<string, object?>
-        {
-            ["id"] = id,
-            ["object"] = "chat.completion.chunk",
-            ["created"] = created,
-            ["choices"] = new[] { choice }
-        };
-
-        root["model"] = !string.IsNullOrWhiteSpace(_model) ? _model : "test-model";
-        return root;
-    }
-
-    private object BuildFinishChunk(string id, long created)
-    {
-        var choice = new Dictionary<string, object?>
-        {
-            ["index"] = 0,
-            ["delta"] = new Dictionary<string, object>
+            Index = lastIdx,
+            Delta = new ChatMessage
             {
-                ["role"] = "assistant",
-                ["reasoning_details"] = Array.Empty<object>(),
-                ["content"] = string.Empty
+                Role = RoleEnum.Assistant,
+                Content = string.Empty
             },
-            ["finishReason"] = "stop",
-            ["nativeFinishReason"] = null,
-            ["logprobs"] = null
+            FinishReason = Choice.FinishReasonEnum.Stop
         };
-
-        var root = new Dictionary<string, object?>
-        {
-            ["id"] = id,
-            ["object"] = "chat.completion.chunk",
-            ["created"] = created,
-            ["choices"] = new[] { choice }
-        };
-
-        root["model"] = !string.IsNullOrWhiteSpace(_model) ? _model : "test-model";
-        return root;
     }
 
-    private async Task SerializeInstructionPlanAsync(
-        InstructionPlan plan,
-        string id,
-        long created,
-        Func<object, Task> writeSse,
-        CancellationToken cancellationToken)
+    private IEnumerable<Choice> SerializeInstructionPlanAsync(InstructionPlan plan)
     {
+        var choices = Enumerable.Empty<Choice>();
         for (int msgIndex = 0; msgIndex < plan.Messages.Count; msgIndex++)
         {
             var message = plan.Messages[msgIndex];
@@ -306,108 +253,36 @@ public sealed class SseStreamHttpContent : HttpContent
                 // Reasoning first if configured at plan level
                 if (plan.ReasoningLength is int rlen && rlen > 0)
                 {
-                    await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: plan.IdMessage));
-                    foreach (var piece in GenerateLoremChunks(rlen, _wordsPerChunk))
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: piece));
-                        if (_chunkDelayMs > 0)
-                        {
-                            await Task.Delay(_chunkDelayMs, cancellationToken);
-                        }
-                    }
-                    await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: plan.IdMessage));
+                    var reasoning = string.Join(" ", GenerateLoremChunks(rlen, _wordsPerChunk));
+                    choices = choices.Concat(ChunkReasoningText(msgIndex, reasoning, _wordsPerChunk));
                 }
 
-                // Text stream for this message
-                await writeSse(BuildChunk(id, created, msgIndex, content: plan.IdMessage, reasoning: null));
-                foreach (var piece in GenerateLoremChunks(Math.Max(0, textLen), _wordsPerChunk))
+                if (textLen > 0)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await writeSse(BuildChunk(id, created, msgIndex, content: piece, reasoning: null));
-                    if (_chunkDelayMs > 0)
-                    {
-                        await Task.Delay(_chunkDelayMs, cancellationToken);
-                    }
+                    var text = string.Join(" ", GenerateLoremChunks(textLen, _wordsPerChunk));
+                    choices = choices.Concat(ChunkTextMessage(msgIndex, text, _wordsPerChunk));
                 }
-                await writeSse(BuildChunk(id, created, msgIndex, content: plan.IdMessage, reasoning: null));
             }
             else if (message.ToolCalls is not null)
             {
                 // Generate proper SSE events for tool calls
                 var messageId = $"msg-{msgIndex}-{Guid.NewGuid():N}";
                 var sequenceId = msgIndex + 1;
-                
-                // Emit stream chunk events for tool calls using proper SSE format
-                for (int toolIdx = 0; toolIdx < message.ToolCalls.Count; toolIdx++)
-                {
-                    var call = message.ToolCalls[toolIdx];
-                    
-                    // Create tool call update object matching what the client expects
-                    var toolCallUpdate = new Dictionary<string, object?>
-                    {
-                        ["name"] = call.Name,
-                        ["arguments"] = call.ArgsJson != null 
-                            ? System.Text.Json.JsonSerializer.Deserialize<object>(call.ArgsJson)
-                            : new Dictionary<string, object>(),
-                        ["id"] = $"tool-{toolIdx}"
-                    };
 
-                    // Build proper SSE stream chunk event
-                    var sseEvent = new Dictionary<string, object?>
-                    {
-                        ["chatId"] = "test-chat",
-                        ["version"] = 1,
-                        ["ts"] = DateTime.UtcNow.ToString("O"),
-                        ["kind"] = "tools_call_update", 
-                        ["messageId"] = messageId,
-                        ["sequenceId"] = sequenceId,
-                        ["payload"] = new Dictionary<string, object?>
-                        {
-                            ["delta"] = "",
-                            ["toolCallUpdates"] = new[] { toolCallUpdate }
-                        }
-                    };
-                    
-                    await writeSse(sseEvent);
-                    
-                    if (_chunkDelayMs > 0)
-                    {
-                        await Task.Delay(_chunkDelayMs, cancellationToken);
-                    }
-                }
-                
-                // Emit message complete event for tool calls
-                var completeEvent = new Dictionary<string, object?>
-                {
-                    ["chatId"] = "test-chat",
-                    ["version"] = 1,
-                    ["ts"] = DateTime.UtcNow.ToString("O"),
-                    ["kind"] = "message_complete",
-                    ["messageId"] = messageId,
-                    ["sequenceId"] = sequenceId,
-                    ["payload"] = new Dictionary<string, object?>
-                    {
-                        ["toolCalls"] = message.ToolCalls.Select(call => new Dictionary<string, object?>
-                        {
-                            ["name"] = call.Name,
-                            ["args"] = call.ArgsJson != null 
-                                ? System.Text.Json.JsonSerializer.Deserialize<object>(call.ArgsJson)
-                                : new Dictionary<string, object>(),
-                            ["id"] = $"tool-{Array.IndexOf(message.ToolCalls.ToArray(), call)}"
-                        }).ToArray()
-                    }
-                };
-                
-                await writeSse(completeEvent);
+                choices = choices.Concat(
+                    ChunkToolCalls(
+                        msgIndex,
+                        message.ToolCalls.Select(tc => (tc.Name, tc.ArgsJson)),
+                        _wordsPerChunk));
             }
         }
+
+        return choices;
     }
 
     private static int CalculateStableWordCount(string seed)
     {
-        using var sha = SHA256.Create();
-        var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(seed ?? string.Empty));
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(seed ?? string.Empty));
         uint val = BitConverter.ToUInt32(bytes, 0);
         return 5 + (int)(val % 100u);
     }
@@ -439,9 +314,7 @@ public sealed class SseStreamHttpContent : HttpContent
         }
     }
 
-    private static IEnumerable<string> GenerateReasoningTokens(
-        string userMessage,
-        int wordsPerChunk)
+    private static IEnumerable<string> GenerateReasoningTokens(int wordsPerChunk)
     {
         var basis = new[]
         {
@@ -459,6 +332,138 @@ public sealed class SseStreamHttpContent : HttpContent
             yield return string.Join(string.Empty, chunkTokens);
         }
     }
+
+    private static IEnumerable<Choice> ChunkReasoningText(
+        int index,
+        string reasoning,
+        int wordsPerChunk)
+    {
+        var tokens = reasoning.Split(' ');
+        var useReasoning = reasoning.GetHashCode() % 2 == 0;
+        for (int i = 0; i < tokens.Length; i += wordsPerChunk)
+        {
+            var chunkTokens = string.Join(' ', tokens.Skip(i).Take(Math.Min(wordsPerChunk, tokens.Length - i)));
+            if (useReasoning)
+            {
+                yield return new Choice
+                {
+                    Index = index,
+                    Delta = new ChatMessage
+                    {
+                        Role = RoleEnum.Assistant,
+                        Reasoning = chunkTokens,
+                        Content = string.Empty,
+                    }
+                };
+            }
+            else
+            {
+
+                yield return new Choice
+                {
+                    Index = index,
+                    Delta = new ChatMessage
+                    {
+                        Role = RoleEnum.Assistant,
+                        ReasoningDetails = [
+                            new ChatMessage.ReasoningDetail
+                            {
+                                Type = "reasoning.summary",
+                                Summary = reasoning,
+                            }
+                        ],
+                        Content = string.Empty,
+                    }
+                };
+            }
+        }
+
+        yield return new Choice
+        {
+            Index = index,
+            Delta = new ChatMessage
+            {
+                Role = RoleEnum.Assistant,
+                ReasoningDetails = [
+                    new ChatMessage.ReasoningDetail
+                    {
+                        Type = "reasoning.encrypted",
+                        Data = Convert.ToBase64String(Encoding.UTF8.GetBytes(reasoning)),
+                    }
+                ],
+                Content = string.Empty
+            }
+        };
+    }
+
+    private static IEnumerable<Choice> ChunkTextMessage(
+        int index,
+        string textContent,
+        int wordsPerChunk)
+    {
+        var tokens = textContent.Split(' ');
+        for (int i = 0; i < tokens.Length; i += wordsPerChunk)
+        {
+            var chunkTokens = string.Join(' ', tokens.Skip(i).Take(Math.Min(wordsPerChunk, tokens.Length - i)));
+            yield return new Choice
+            {
+                Index = index,
+                Delta = new ChatMessage
+                {
+                    Role = RoleEnum.Assistant,
+                    Content = new Union<string, Union<TextContent, ImageContent>[]>(chunkTokens)
+                }
+            };
+        }
+    }
+
+    private static IEnumerable<Choice> ChunkToolCalls(
+        int index,
+        IEnumerable<(string functionName, string argsJson)> toolCalls,
+        int wordsPerChunk)
+    {
+        int idx = -1;
+        foreach (var (functionName, argsJson) in toolCalls)
+        {
+            idx++;
+            var tool_call_id = Guid.NewGuid().ToString();
+            yield return new Choice
+            {
+                Index = index,
+                Delta = new ChatMessage
+                {
+                    Role = RoleEnum.Assistant,
+                    ToolCalls = [
+                        new FunctionContent(
+                            tool_call_id,
+                            new FunctionCall(functionName, string.Empty))
+                        {
+                            Index = idx,
+                        }
+                    ],
+                }
+            };
+
+            for (int i = 0; i < argsJson.Length; i += wordsPerChunk)
+            {
+                var len = Math.Min(wordsPerChunk, argsJson.Length - i);
+                yield return new Choice
+                {
+                    Index = index,
+                    Delta = new ChatMessage
+                    {
+                        Role = RoleEnum.Assistant,
+                        ToolCalls = [
+                            new FunctionContent(
+                                tool_call_id,
+                                new FunctionCall(string.Empty, argsJson.Substring(i, len)))
+                            {
+                                Index = idx,
+                            }
+                        ],
+                    }
+                };
+            }
+        }
+    }
 }
-
-

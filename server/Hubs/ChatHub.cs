@@ -1,8 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
 using AIChat.Server.Services;
-using AchieveAi.LmDotnetTools.LmCore.Agents;
-using AchieveAi.LmDotnetTools.LmCore.Messages;
-using System.Collections.Immutable;
 
 namespace AIChat.Server.Hubs;
 

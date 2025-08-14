@@ -1,10 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Lib.AspNetCore.ServerSentEvents;
 using AIChat.Server.Services;
-using AIChat.Server.Models.SSE;
 using AIChat.Server.Extensions;
 using ChatDto = AIChat.Server.Services.ChatDto;
-using MessageDto = AIChat.Server.Services.MessageDto;
 
 namespace AIChat.Server.Controllers;
 
