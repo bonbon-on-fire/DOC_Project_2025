@@ -103,6 +103,7 @@ export const expandedStates = derived([messageStates, latestMessageId], ([states
 /**
  * Updates the state of a specific message with partial state changes.
  * Merges provided updates with existing state.
+ * Only triggers store update if values actually changed.
  *
  * @param messageId - The ID of the message to update
  * @param updates - Partial state updates to apply
@@ -118,6 +119,18 @@ export function updateMessageState(messageId: string, updates: Partial<MessageSt
 			expanded: false,
 			renderPhase: 'initial' as const
 		};
+
+		// Check if any values actually changed
+		const hasChanges = Object.keys(updates).some(key => {
+			const updateKey = key as keyof MessageState;
+			const newValue = updates[updateKey];
+			const existingValue = existingState[updateKey];
+			return newValue !== existingValue;
+		});
+
+		if (!hasChanges) {
+			return states; // Return unchanged state to prevent unnecessary reactive updates
+		}
 
 		const newState = {
 			...existingState,

@@ -52,6 +52,52 @@ describe('Message State Management', () => {
 			expect(state.renderPhase).toBe('streaming');
 		});
 
+		it('should not trigger store update when values have not changed', () => {
+			// Set initial state
+			updateMessageState('msg-1', { expanded: true, renderPhase: 'streaming' });
+			
+			// Capture current state reference
+			const statesBefore = get(messageStates);
+			
+			// Update with identical values
+			updateMessageState('msg-1', { expanded: true, renderPhase: 'streaming' });
+			
+			// State reference should be unchanged (no new object created)
+			const statesAfter = get(messageStates);
+			expect(statesAfter).toBe(statesBefore); // Reference equality check
+		});
+
+		it('should not trigger store update for partial identical values', () => {
+			// Set initial state
+			updateMessageState('msg-1', { expanded: true, renderPhase: 'streaming' });
+			
+			// Capture current state reference
+			const statesBefore = get(messageStates);
+			
+			// Update with only identical partial values
+			updateMessageState('msg-1', { expanded: true });
+			
+			// State reference should be unchanged (no new object created)
+			const statesAfter = get(messageStates);
+			expect(statesAfter).toBe(statesBefore); // Reference equality check
+		});
+
+		it('should trigger store update when values actually change', () => {
+			// Set initial state
+			updateMessageState('msg-1', { expanded: true, renderPhase: 'initial' });
+			
+			// Capture current state reference
+			const statesBefore = get(messageStates);
+			
+			// Update with different values
+			updateMessageState('msg-1', { expanded: false });
+			
+			// State reference should have changed (new object created)
+			const statesAfter = get(messageStates);
+			expect(statesAfter).not.toBe(statesBefore); // Reference inequality check
+			expect(statesAfter['msg-1'].expanded).toBe(false);
+		});
+
 		it('should create new state object if message does not exist', () => {
 			updateMessageState('new-msg', { expanded: false, renderPhase: 'complete' });
 

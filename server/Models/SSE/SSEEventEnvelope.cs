@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using AchieveAi.LmDotnetTools.LmCore.Messages;
 
 namespace AIChat.Server.Models.SSE;
 
@@ -86,6 +87,15 @@ public class ReasoningStreamChunkPayload : StreamChunkPayload
 }
 
 /// <summary>
+/// Payload for tool call update streaming chunks
+/// </summary>
+public class ToolCallUpdateStreamChunkPayload : StreamChunkPayload
+{
+    [JsonPropertyName("toolCallUpdate")]
+    public required ToolCallUpdate ToolCallUpdate { get; set; }
+}
+
+/// <summary>
 /// Envelope for complete message events
 /// </summary>
 public class MessageCompleteEventEnvelope : SSEEventEnvelope
@@ -126,6 +136,15 @@ public class ReasoningCompletePayload : MessageCompletePayload
 
     [JsonPropertyName("visibility")]
     public string? Visibility { get; set; }
+}
+
+/// <summary>
+/// Payload for completed tool call messages
+/// </summary>
+public class ToolCallCompletePayload : MessageCompletePayload
+{
+    [JsonPropertyName("toolCalls")]
+    public required ToolCall[] ToolCalls { get; set; }
 }
 
 /// <summary>

@@ -186,7 +186,7 @@ public sealed class SseStreamHttpContent : HttpContent
 
         if (_reasoningFirst)
         {
-            foreach (var token in GenerateReasoningTokens(_userMessage))
+            foreach (var token in GenerateReasoningTokens(_userMessage, _wordsPerChunk))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 await WriteSseAsync(BuildChunk(id, created, indexOverride: 0, content: null, reasoning: token));
@@ -334,68 +334,72 @@ public sealed class SseStreamHttpContent : HttpContent
             }
             else if (message.ToolCalls is not null)
             {
-                // Emit progressive tool call deltas
+                // Generate proper SSE events for tool calls
+                var messageId = $"msg-{msgIndex}-{Guid.NewGuid():N}";
+                var sequenceId = msgIndex + 1;
+                
+                // Emit stream chunk events for tool calls using proper SSE format
                 for (int toolIdx = 0; toolIdx < message.ToolCalls.Count; toolIdx++)
                 {
                     var call = message.ToolCalls[toolIdx];
-                    // Name first
-                    var nameDelta = new[]
+                    
+                    // Create tool call update object matching what the client expects
+                    var toolCallUpdate = new Dictionary<string, object?>
                     {
-                        new Dictionary<string, object?>
+                        ["name"] = call.Name,
+                        ["arguments"] = call.ArgsJson != null 
+                            ? System.Text.Json.JsonSerializer.Deserialize<object>(call.ArgsJson)
+                            : new Dictionary<string, object>(),
+                        ["id"] = $"tool-{toolIdx}"
+                    };
+
+                    // Build proper SSE stream chunk event
+                    var sseEvent = new Dictionary<string, object?>
+                    {
+                        ["chatId"] = "test-chat",
+                        ["version"] = 1,
+                        ["ts"] = DateTime.UtcNow.ToString("O"),
+                        ["kind"] = "tools_call_update", 
+                        ["messageId"] = messageId,
+                        ["sequenceId"] = sequenceId,
+                        ["payload"] = new Dictionary<string, object?>
                         {
-                            ["index"] = toolIdx,
-                            ["id"] = null,
-                            ["type"] = "function",
-                            ["function"] = new Dictionary<string, object?>
-                            {
-                                ["name"] = call.Name,
-                                ["arguments"] = string.Empty
-                            }
+                            ["delta"] = "",
+                            ["toolCallUpdates"] = new[] { toolCallUpdate }
                         }
                     };
-                    await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: null, toolCallsDelta: nameDelta));
-
-                    // Arguments progressively in two chunks (simple)
-                    var args = call.ArgsJson ?? string.Empty;
-                    var split = Math.Max(1, args.Length / 2);
-                    var part1 = args.Substring(0, split);
-                    var part2 = args.Substring(split);
-
-                    var argsDelta1 = new[]
+                    
+                    await writeSse(sseEvent);
+                    
+                    if (_chunkDelayMs > 0)
                     {
-                        new Dictionary<string, object?>
-                        {
-                            ["index"] = toolIdx,
-                            ["id"] = null,
-                            ["type"] = "function",
-                            ["function"] = new Dictionary<string, object?>
-                            {
-                                ["name"] = call.Name,
-                                ["arguments"] = part1
-                            }
-                        }
-                    };
-                    await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: null, toolCallsDelta: argsDelta1));
-
-                    if (!string.IsNullOrEmpty(part2))
-                    {
-                        var argsDelta2 = new[]
-                        {
-                            new Dictionary<string, object?>
-                            {
-                                ["index"] = toolIdx,
-                                ["id"] = null,
-                                ["type"] = "function",
-                                ["function"] = new Dictionary<string, object?>
-                                {
-                                    ["name"] = call.Name,
-                                    ["arguments"] = part2
-                                }
-                            }
-                        };
-                        await writeSse(BuildChunk(id, created, msgIndex, content: null, reasoning: null, toolCallsDelta: argsDelta2));
+                        await Task.Delay(_chunkDelayMs, cancellationToken);
                     }
                 }
+                
+                // Emit message complete event for tool calls
+                var completeEvent = new Dictionary<string, object?>
+                {
+                    ["chatId"] = "test-chat",
+                    ["version"] = 1,
+                    ["ts"] = DateTime.UtcNow.ToString("O"),
+                    ["kind"] = "message_complete",
+                    ["messageId"] = messageId,
+                    ["sequenceId"] = sequenceId,
+                    ["payload"] = new Dictionary<string, object?>
+                    {
+                        ["toolCalls"] = message.ToolCalls.Select(call => new Dictionary<string, object?>
+                        {
+                            ["name"] = call.Name,
+                            ["args"] = call.ArgsJson != null 
+                                ? System.Text.Json.JsonSerializer.Deserialize<object>(call.ArgsJson)
+                                : new Dictionary<string, object>(),
+                            ["id"] = $"tool-{Array.IndexOf(message.ToolCalls.ToArray(), call)}"
+                        }).ToArray()
+                    }
+                };
+                
+                await writeSse(completeEvent);
             }
         }
     }
@@ -435,7 +439,9 @@ public sealed class SseStreamHttpContent : HttpContent
         }
     }
 
-    private static IEnumerable<string> GenerateReasoningTokens(string userMessage)
+    private static IEnumerable<string> GenerateReasoningTokens(
+        string userMessage,
+        int wordsPerChunk)
     {
         var basis = new[]
         {
@@ -447,9 +453,10 @@ public sealed class SseStreamHttpContent : HttpContent
             " don't", " have", " the", " previous", " conversation", " context", "."
         };
 
-        foreach (var token in basis)
+        for (int i = 0; i < basis.Length; i += wordsPerChunk)
         {
-            yield return token;
+            var chunkTokens = basis.Skip(i).Take(Math.Min(wordsPerChunk, basis.Length - i));
+            yield return string.Join(string.Empty, chunkTokens);
         }
     }
 }

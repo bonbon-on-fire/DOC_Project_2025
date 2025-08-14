@@ -45,6 +45,14 @@ export interface MessageSnapshot {
 	reasoning?: string;
 	visibility?: 'Plain' | 'Summary' | 'Encrypted';
 	usage?: Record<string, unknown>;
+	
+	// Tool call fields
+	toolCalls?: Array<{
+		name: string;
+		args: any;
+		argsJson?: string; // For accumulating streamed JSON
+		id?: string;
+	}>;
 }
 
 /**

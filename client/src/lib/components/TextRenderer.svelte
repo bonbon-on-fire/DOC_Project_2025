@@ -3,7 +3,7 @@
 	import type { MessageDto, TextMessageDto, RichMessageDto } from '$lib/types';
 	import type { MessageRenderer } from '$lib/types/renderer';
 	import { formatTime } from '$lib/utils/time';
-	import { currentStreamingMessage, isStreaming } from '$lib/stores/chat';
+	import { streamingSnapshots } from '$lib/stores/chat';
 
 	// Component props with proper TypeScript typing
 	export let message: TextMessageDto & RichMessageDto;
@@ -93,9 +93,9 @@
 					class:dark\:text-gray-300={message.role !== 'system'}
 					data-testid="message-content"
 				>
-					{#if isLastAssistantMessage && $isStreaming && message.role === 'assistant'}
-						{#if $currentStreamingMessage?.trim()}
-							{@html renderContent($currentStreamingMessage)}
+					{#if Boolean($streamingSnapshots?.[message.id]?.isStreaming)}
+						{#if ($streamingSnapshots?.[message.id]?.textDelta || '').trim()}
+							{@html renderContent($streamingSnapshots?.[message.id]?.textDelta || '')}
 						{:else}
 							<!-- Thinking indicator while first tokens arrive -->
 							<div class="flex items-center space-x-1 text-gray-500 dark:text-gray-400">

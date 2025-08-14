@@ -1,8 +1,7 @@
 <script lang="ts">
 	import type { RichMessageDto } from '$lib/types/chat';
 	import { formatTime } from '$lib/utils/time';
-	import { currentStreamingMessage, isStreaming } from '$lib/stores/chat';
-	import { currentReasoningMessage } from '$lib/stores/chat';
+	import { streamingSnapshots } from '$lib/stores/chat';
 
 	export let message: RichMessageDto;
 	export let isLastAssistantMessage = false;
@@ -88,33 +87,33 @@
 					class:dark\:text-yellow-200={message.role === 'system'}
 					class:dark\:text-gray-300={message.role !== 'system'}
 				>
-					{#if isLastAssistantMessage && $isStreaming && message.role === 'assistant'}
+					{#if Boolean($streamingSnapshots?.[message.id]?.isStreaming)}
 						<!-- Debug logging for streaming condition -->
 						{#if typeof console !== 'undefined'}
 							{console.log('[MessageBubble] Streaming condition met:', {
 								isLastAssistantMessage,
-								isStreaming: $isStreaming,
+								isStreaming: Boolean($streamingSnapshots?.[message.id]?.isStreaming),
 								messageRole: message.role,
-								currentStreamingMessage: $currentStreamingMessage,
-								currentReasoningMessage: $currentReasoningMessage
+								textDelta: $streamingSnapshots?.[message.id]?.textDelta,
+								reasoningDelta: $streamingSnapshots?.[message.id]?.reasoningDelta
 							})}
 						{/if}
-						{#if $currentReasoningMessage.trim()}
+						{#if ($streamingSnapshots?.[message.id]?.reasoningDelta || '').trim()}
 							<div
 								class="mb-2 border-l-2 border-gray-300 pl-2 text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400"
 								data-testid="reasoning-content"
 							>
-								{@html formatContent($currentReasoningMessage)}
+								{@html formatContent($streamingSnapshots?.[message.id]?.reasoningDelta || '')}
 							</div>
 						{/if}
-						<div data-testid="message-content">{@html formatContent($currentStreamingMessage)}</div>
+						<div data-testid="message-content">{@html formatContent($streamingSnapshots?.[message.id]?.textDelta || '')}</div>
 						<span class="animate-pulse">▋</span>
 					{:else}
 						<!-- Debug logging for non-streaming condition -->
 						{#if typeof console !== 'undefined'}
 							{console.log('[MessageBubble] Non-streaming condition:', {
 								isLastAssistantMessage,
-								isStreaming: $isStreaming,
+								isStreaming: Boolean($streamingSnapshots?.[message.id]?.isStreaming),
 								messageRole: message.role,
 								messageText: getMessageText(message)
 							})}

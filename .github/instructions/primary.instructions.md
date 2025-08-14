@@ -1,4 +1,9 @@
-# CLAUDE.md
+---
+description: Instructions for how to observe file changes and build errors when apps are running with hot reload
+applyTo: '**'
+---
+
+# primary-instructions.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -196,3 +201,4 @@ Debugging follows followig steps:
 To achieve above methodology (in absence of debugger access), you MUST use Logs and 'duckdb' to debug the system.
 
 Note: The test mode logs paths.
+

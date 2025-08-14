@@ -1,6 +1,7 @@
 using AchieveAi.LmDotnetTools.LmCore.Core;
 using AchieveAi.LmDotnetTools.LmCore.Messages;
 using AIChat.Server.Models;
+using ModelContextProtocol.Protocol;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -154,22 +155,34 @@ public abstract record StreamChunkEvent
 {
     [JsonPropertyName("chatId")]
     public required string ChatId { get; init; }
-    
+
     [JsonPropertyName("messageId")]
     public required string MessageId { get; init; }
-    
+
     [JsonPropertyName("done")]
     public required bool Done { get; init; }
-    
+
     [JsonPropertyName("kind")]
     public required string Kind { get; init; }
+
+    [JsonPropertyName("sequenceNumber")]
+    public required int SequenceNumber { get; init; }
+
+    [JsonPropertyName("chunkSequenceId")]
+    public required int ChunkSequenceId { get; init; }
+}
+
+public record ToolsCallUpdateStreamEvent : StreamChunkEvent
+{
+    [JsonPropertyName("toolCallUpdate")]
+    public required ToolCallUpdate ToolCallUpdate { get; init; }
 }
 
 public record ReasoningStreamEvent : StreamChunkEvent
 {
     [JsonPropertyName("delta")]
     public required string Delta { get; init; }
-    
+
     [JsonPropertyName("visibility")]
     public ReasoningVisibility? Visibility { get; init; }
 }
@@ -180,6 +193,15 @@ public record TextStreamEvent : StreamChunkEvent
     public required string Delta { get; init; }
 }
 
+public record ToolCallStreamEvent : StreamChunkEvent
+{
+    [JsonPropertyName("delta")]
+    public required string Delta { get; init; }
+    
+    [JsonPropertyName("toolCalls")]
+    public object[]? ToolCalls { get; init; }
+}
+
 public record MessageStreamCompleteEvent : StreamChunkEvent
 {
 }
@@ -188,12 +210,15 @@ public abstract record MessageEvent
 {
     [JsonPropertyName("chatId")]
     public required string ChatId { get; init; }
-    
+
     [JsonPropertyName("messageId")]
     public required string MessageId { get; init; }
-    
+
     [JsonPropertyName("kind")]
     public required string Kind { get; init; }
+
+    [JsonPropertyName("sequenceNumber")]
+    public required int SequenceNumber { get; init; }
 }
 
 public record UsageEvent : MessageEvent
@@ -215,6 +240,12 @@ public record TextEvent : MessageEvent
 {
     [JsonPropertyName("text")]
     public required string Text { get; init; }
+}
+
+public record ToolCallEvent : MessageEvent
+{
+    [JsonPropertyName("toolCalls")]
+    public required ToolCall[] ToolCalls { get; init; }
 }
 
 // DTO types (moved from ChatController for reuse)
@@ -243,6 +274,7 @@ public record ChatDto
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "messageType")]
 [JsonDerivedType(typeof(TextMessageDto), typeDiscriminator: "text")]
 [JsonDerivedType(typeof(ReasoningMessageDto), typeDiscriminator: "reasoning")]
+[JsonDerivedType(typeof(ToolCallMessageDto), typeDiscriminator: "tool_call")]
 [JsonDerivedType(typeof(UsageMessageDto), typeDiscriminator: "usage")]
 public class MessageDto
 {
@@ -288,6 +320,12 @@ public class ReasoningMessageDto : MessageDto
     public ReasoningVisibility Visibility { get; set; }
 
     public string? GetText() => Visibility == ReasoningVisibility.Encrypted ? null : Reasoning;
+}
+
+public class ToolCallMessageDto : MessageDto
+{
+    [JsonPropertyName("toolCalls")]
+    public required ToolCall[] ToolCalls { get; set; }
 }
 
 public class UsageMessageDto : MessageDto

@@ -309,6 +309,7 @@ public class ChatService : IChatService
 
     public async Task<StreamInitResult> PrepareStreamChatAsync(StreamChatRequest request)
     {
+        _logger.LogInformation("[DEBUG] PrepareStreamChatAsync - UserId: {UserId}, Message: {Message}", request.UserId, request.Message);
         var now = DateTime.UtcNow;
         var createRes = await _storage.CreateChatAsync(
             request.UserId,
@@ -324,39 +325,18 @@ public class ChatService : IChatService
 
         var chatId = createRes.Chat.Id;
 
-        var (seqSuccess, seqError, nextSequence) = await _storage.AllocateSequenceAsync(chatId);
+        var (seqSuccess, seqError, userMsgSequence) = await _storage.AllocateSequenceAsync(chatId);
         if (!seqSuccess) throw new InvalidOperationException(seqError);
-        var userDto = new TextMessageDto
-        {
-            Id = Guid.NewGuid().ToString(),
-            ChatId = chatId,
-            Role = "user",
-            Timestamp = DateTime.UtcNow,
-            SequenceNumber = nextSequence,
-            Text = request.Message
-        };
-
-        await _storage.InsertMessageAsync(new MessageRecord
-        {
-            Id = userDto.Id,
-            ChatId = chatId,
-            Role = userDto.Role,
-            Kind = "text",
-            TimestampUtc = userDto.Timestamp,
-            SequenceNumber = userDto.SequenceNumber,
-            MessageJson = JsonSerializer.Serialize<MessageDto>(userDto)
-        });
 
         if (!string.IsNullOrEmpty(request.SystemPrompt))
         {
-            var (_, _, sysNextSequence) = await _storage.AllocateSequenceAsync(chatId);
             var sysDto = new TextMessageDto
             {
                 Id = Guid.NewGuid().ToString(),
                 ChatId = chatId,
                 Role = "system",
                 Timestamp = DateTime.UtcNow.AddMilliseconds(-1),
-                SequenceNumber = sysNextSequence,
+                SequenceNumber = userMsgSequence++,
                 Text = request.SystemPrompt!
             };
 
@@ -371,6 +351,27 @@ public class ChatService : IChatService
                 MessageJson = JsonSerializer.Serialize<MessageDto>(sysDto)
             });
         }
+
+        var userDto = new TextMessageDto
+        {
+            Id = Guid.NewGuid().ToString(),
+            ChatId = chatId,
+            Role = "user",
+            Timestamp = DateTime.UtcNow,
+            SequenceNumber = userMsgSequence,
+            Text = request.Message
+        };
+
+        await _storage.InsertMessageAsync(new MessageRecord
+        {
+            Id = userDto.Id,
+            ChatId = chatId,
+            Role = userDto.Role,
+            Kind = "text",
+            TimestampUtc = userDto.Timestamp,
+            SequenceNumber = userDto.SequenceNumber,
+            MessageJson = JsonSerializer.Serialize<MessageDto>(userDto)
+        });
 
         return new StreamInitResult
         {
@@ -415,11 +416,28 @@ public class ChatService : IChatService
         List<MessageDto> history,
         CancellationToken cancellationToken)
     {
+        _logger.LogInformation("[DEBUG] StreamChatCompletionAsync - ChatId: {ChatId}, History count: {Count}", chatId, history.Count);
+        foreach (var msg in history)
+        {
+            _logger.LogInformation("[DEBUG] History message - Role: {Role}, Type: {Type}, Content: {Content}", 
+                msg.Role, msg.GetType().Name, 
+                msg is TextMessageDto textMsg ? textMsg.Text?.Substring(0, Math.Min(100, textMsg.Text.Length)) + "..." : "N/A");
+        }
+        
         var lmMessages = history.Select(ConvertToLmMessage).ToList();
+        var userMsgSequence = history.Count > 0 ? history.Max(m => m.SequenceNumber) + 1 : 1;
+
+        _logger.LogInformation("[DEBUG] Converted to {Count} LM messages", lmMessages.Count);
+        foreach (var lmMsg in lmMessages)
+        {
+            _logger.LogInformation("[DEBUG] LM message - Role: {Role}, Type: {Type}", lmMsg.Role, lmMsg.GetType().Name);
+        }
+        
         _logger.LogInformation("Making API call to LLM for chat {ChatId}", chatId);
         var options = new GenerateReplyOptions { ModelId = GetModelId() };
 
         var streamingResponse = await _streamingAgent
+            .WithMiddleware(new JsonFragmentUpdateMiddleware())
             .WithMiddleware(
                 (context, agent, cancellationToken) =>
                 {
@@ -435,7 +453,7 @@ public class ChatService : IChatService
                         context.Options,
                         cancellationToken);
 
-                    return ProcessStream(stream, chatId, cancellationToken);
+                    return ProcessStream(stream, chatId, userMsgSequence, cancellationToken);
                 }
             )
             .WithMiddleware(new MessageUpdateJoinerMiddleware())
@@ -446,18 +464,25 @@ public class ChatService : IChatService
 
         _logger.LogInformation("Received response from LLM for chat {ChatId}", chatId);
 
-        int fullMessageIndex = 0;
+        int fullMessageIndex = userMsgSequence;
         Type? lastFullMessageType = null;
         await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
         {
-            if (message.GetType() != lastFullMessageType && lastFullMessageType != null)
+            if (message.GetType() != lastFullMessageType)
             {
                 fullMessageIndex++;
             }
 
             lastFullMessageType = message.GetType();
             var fullMessageId = message.GenerationId + $"-{fullMessageIndex:D3}";
-            await PersistFullMessage(chatId, message, fullMessageId);
+            var sequenceNumber = await PersistFullMessage(chatId, message, fullMessageId);
+            if (sequenceNumber != fullMessageIndex)
+            {
+                _logger.LogError(
+                    "Sequence number mismatch: {Expected}, {Actual}",
+                    fullMessageIndex,
+                    sequenceNumber);
+            }
 
             if (MessageReceived != null)
             {
@@ -468,6 +493,7 @@ public class ChatService : IChatService
                         ChatId = chatId,
                         MessageId = fullMessageId,
                         Kind = "text",
+                        SequenceNumber = sequenceNumber,
                         Text = textMessage.Text
                     },
                     ReasoningMessage reasoningMessage => new ReasoningEvent
@@ -475,6 +501,7 @@ public class ChatService : IChatService
                         ChatId = chatId,
                         MessageId = fullMessageId,
                         Kind = "reasoning",
+                        SequenceNumber = sequenceNumber,
                         Reasoning = reasoningMessage.Reasoning,
                         Visibility = reasoningMessage.Visibility
                     },
@@ -483,6 +510,7 @@ public class ChatService : IChatService
                         ChatId = chatId,
                         MessageId = fullMessageId,
                         Kind = "usage",
+                        SequenceNumber = sequenceNumber,
                         Usage = usageMessage.Usage
                     },
                     _ => null
@@ -501,17 +529,22 @@ public class ChatService : IChatService
     private async IAsyncEnumerable<IMessage> ProcessStream(
         IAsyncEnumerable<IMessage> stream,
         string chatId,
+        int userMsgSequence,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        int messageIndex = 0;
+        int messageIndex = userMsgSequence;
+        int chunkSequenceId = 0;
         Type? lastType = null;
 
         await foreach (var message in stream.WithCancellation(cancellationToken))
         {
-            if (message.GetType() != lastType && lastType != null)
+            if (message.GetType() != lastType)
             {
                 messageIndex++;
+                chunkSequenceId = 0;
             }
+
+            chunkSequenceId++;
 
             lastType = message.GetType();
             var messageId = message.GenerationId + $"-{messageIndex:D3}";
@@ -521,6 +554,13 @@ public class ChatService : IChatService
                 var content = textMessage.Text;
                 if (!string.IsNullOrEmpty(content))
                 {
+                    _logger.LogTrace(
+                        "TextUpdateMessage - ChatId: {ChatId}, MessageId: {MessageId}, {Type}, Content: {Delta}",
+                        chatId,
+                        messageId,
+                        "text",
+                        content);
+
                     if (StreamChunkReceived != null)
                     {
                         await StreamChunkReceived(
@@ -530,7 +570,9 @@ public class ChatService : IChatService
                                 MessageId = messageId,
                                 Kind = "text",
                                 Done = false,
-                                Delta = content
+                                Delta = content,
+                                ChunkSequenceId = chunkSequenceId,
+                                SequenceNumber = messageIndex,
                             });
                     }
                 }
@@ -541,6 +583,13 @@ public class ChatService : IChatService
                 var delta = reasoningUpdate.Reasoning;
                 if (!string.IsNullOrEmpty(delta))
                 {
+                    _logger.LogTrace(
+                        "ReasoningUpdateMessage - ChatId: {ChatId}, MessageId: {MessageId}, {Type}, Content: {Delta}",
+                        chatId,
+                        messageId,
+                        "reasoning",
+                        delta);
+
                     if (StreamChunkReceived != null)
                     {
                         await StreamChunkReceived(
@@ -551,7 +600,35 @@ public class ChatService : IChatService
                                 Kind = "reasoning",
                                 Done = false,
                                 Delta = delta,
+                                ChunkSequenceId = chunkSequenceId,
+                                SequenceNumber = messageIndex,
                                 Visibility = reasoningUpdate.Visibility
+                            });
+                    }
+                }
+            }
+            else if (message is ToolsCallUpdateMessage toolsCallUpdateMessage)
+            {
+                foreach (var toolCallUpdate in toolsCallUpdateMessage.ToolCallUpdates)
+                {
+                    _logger.LogTrace(
+                        "ToolsCallUpdateMessage - ChatId: {ChatId}, MessageId: {MessageId}, {Type}, Tool: {Delta}",
+                        chatId,
+                        messageId,
+                        "tools_call_update",
+                        JsonSerializer.Serialize(toolCallUpdate));
+                    if (StreamChunkReceived != null)
+                    {
+                        await StreamChunkReceived(
+                            new ToolsCallUpdateStreamEvent
+                            {
+                                ChatId = chatId,
+                                MessageId = messageId,
+                                Kind = "tools_call_update",
+                                Done = false,
+                                ChunkSequenceId = chunkSequenceId,
+                                SequenceNumber = messageIndex,
+                                ToolCallUpdate = toolCallUpdate
                             });
                     }
                 }
@@ -563,7 +640,7 @@ public class ChatService : IChatService
         yield break;
     }
 
-    private async Task PersistFullMessage(
+    private async Task<int> PersistFullMessage(
         string chatId,
         IMessage message,
         string fullMessageId)
@@ -618,15 +695,35 @@ public class ChatService : IChatService
                 Kind = "usage",
                 TimestampUtc = timestamp,
                 SequenceNumber = nextSequence,
-                MessageJson = JsonSerializer.Serialize<MessageDto>(new UsageMessageDto
-                {
-                    Id = fullMessageId,
-                    ChatId = chatId,
-                    Role = usage.Role.ToString(),
-                    Timestamp = timestamp,
-                    SequenceNumber = nextSequence,
-                    Usage = usage.Usage
-                })
+                MessageJson = JsonSerializer.Serialize<MessageDto>(
+                    new UsageMessageDto
+                    {
+                        Id = fullMessageId,
+                        ChatId = chatId,
+                        Role = usage.Role.ToString(),
+                        Timestamp = timestamp,
+                        SequenceNumber = nextSequence,
+                        Usage = usage.Usage
+                    })
+            },
+            ToolsCallMessage toolsCall => new MessageRecord
+            {
+                Id = fullMessageId,
+                ChatId = chatId,
+                Role = toolsCall.Role.ToString(),
+                Kind = "tools_call",
+                TimestampUtc = timestamp,
+                SequenceNumber = nextSequence,
+                MessageJson = JsonSerializer.Serialize<MessageDto>(
+                    new ToolCallMessageDto
+                    {
+                        Id = fullMessageId,
+                        ChatId = chatId,
+                        Role = toolsCall.Role.ToString(),
+                        Timestamp = timestamp,
+                        SequenceNumber = nextSequence,
+                        ToolCalls = [.. toolsCall.ToolCalls]
+                    })
             },
             _ => null
         };
@@ -635,6 +732,8 @@ public class ChatService : IChatService
         {
             await _storage.InsertMessageAsync(messageRecord);
         }
+
+        return nextSequence;
     }
 
     public async Task<MessageResult> AddUserMessageToExistingChatAsync(string chatId, string userId, string message)

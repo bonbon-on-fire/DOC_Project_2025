@@ -126,15 +126,15 @@ public class ChatController : ControllerBase
         // Generic side-channel forwarder
         async Task ForwardSideChannel(StreamChunkEvent ev)
         {
-            var envelope = ev.ToSSEEnvelope(currentAssistantSequenceNumber);
-            var sid = $"{ev.ChatId}:{ev.MessageId}:{currentAssistantSequenceNumber}";
+            var envelope = ev.ToSSEEnvelope();
+            var sid = $"{ev.ChatId}:{ev.MessageId}:{ev.SequenceNumber}:{ev.ChunkSequenceId}";
             await SendSseEvent("messageupdate", envelope, sid);
         }
 
         async Task ForwardMessage(MessageEvent ev)
         {
-            var envelope = ev.ToSSEEnvelope(currentAssistantSequenceNumber);
-            var sid = $"{ev.ChatId}:{ev.MessageId}:{currentAssistantSequenceNumber}";
+            var envelope = ev.ToSSEEnvelope();
+            var sid = $"{ev.ChatId}:{ev.MessageId}:{ev.SequenceNumber}";
             await SendSseEvent("message", envelope, sid);
         }
 

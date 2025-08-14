@@ -14,8 +14,35 @@ using AIChat.Server.Services.TestMode;
 using AIChat.Server.Logging;
 using AIChat.Server.Storage.Sqlite;
 using AIChat.Server.Storage;
+using Serilog;
+using Serilog.Formatting.Compact;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure Serilog for JSON file logging - ensure logs go to project root
+var projectRoot = Directory.GetParent(Directory.GetCurrentDirectory())?.FullName ?? Directory.GetCurrentDirectory();
+var logFileName = builder.Environment.EnvironmentName switch
+{
+    "Development" => Path.Combine(projectRoot, "logs", "server", "app-dev.jsonl"),
+    "Test" => Path.Combine(projectRoot, "logs", "server", "app-test.jsonl"),
+    _ => Path.Combine(projectRoot, "logs", "server", "app.jsonl")
+};
+
+// Ensure log directory exists
+Directory.CreateDirectory(Path.GetDirectoryName(logFileName)!);
+
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Verbose()
+    .WriteTo.Console()
+    .WriteTo.File(
+        new CompactJsonFormatter(), 
+        logFileName,
+        shared: true,
+        buffered: false,
+        restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Verbose)
+    .CreateLogger();
+
+builder.Host.UseSerilog();
 
 // Add services to the container
 builder.Services.AddControllers();
@@ -165,15 +192,9 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Add logging and register a timestamped Debug logger for Dev/Test so VS Output shows timestamps
+// Add timestamped Debug logger for Dev/Test so VS Output shows timestamps
 builder.Services.AddLogging(logging =>
 {
-    // Clear default providers to avoid duplicate outputs when running under VS
-    logging.ClearProviders();
-
-    // Always include Console; timestamp format is configured via appsettings.*.json
-    logging.AddConsole();
-
     // Add our timestamped Debug provider so VS Immediate/Output shows timestamps
     if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Test"))
     {

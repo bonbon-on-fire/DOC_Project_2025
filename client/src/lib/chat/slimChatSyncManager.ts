@@ -43,6 +43,15 @@ export class SlimChatSyncManager implements HandlerEventListener {
 	private currentChatId: string | null = null;
 	private currentUserMessage: string = '';
 
+	/** Map server event id + kind to a stable, UI-unique message id */
+	private toDisplayId(kind: string, messageId: string): string {
+		// Ensure reasoning/text/tools do not collide if server reuses ids
+		if (kind === 'text' || kind === 'reasoning' || kind === 'tool_call' || kind === 'tool_result') {
+			return `${messageId}:${kind}`;
+		}
+		return messageId;
+	}
+
 	constructor(
 		handlerRegistry: MessageHandlerRegistry,
 		currentChatStore: Writable<ChatDto | null>,
@@ -116,12 +125,13 @@ export class SlimChatSyncManager implements HandlerEventListener {
 		try {
 			// Ensure a stable, message-level sequence number exists on the envelope so
 			// handlers use the same sequence across chunks and completion.
-			const seq = this.getOrAssignProvisionalSequence(envelope.chatId, envelope.messageId);
-			const fixedEnvelope: StreamChunkEventEnvelope = { ...envelope, sequenceId: seq };
-			const snapshot = handler.processChunk(envelope.messageId, fixedEnvelope);
+			const displayId = this.toDisplayId(envelope.kind, envelope.messageId);
+			const seq = this.getOrAssignProvisionalSequence(envelope.chatId, displayId);
+			const fixedEnvelope: StreamChunkEventEnvelope = { ...envelope, messageId: displayId, sequenceId: seq } as StreamChunkEventEnvelope;
+			const snapshot = handler.processChunk(displayId, fixedEnvelope);
 			
 			// Update streaming UI state based on the updated snapshot
-			this.updateStreamingState(envelope.messageId, snapshot.messageType, snapshot);
+			this.updateStreamingState(displayId, snapshot.messageType, snapshot);
 		} catch (error) {
 			console.error(`Error processing chunk for ${envelope.kind}:`, error);
 		}
@@ -139,9 +149,11 @@ export class SlimChatSyncManager implements HandlerEventListener {
 
 		try {
 			// Cache authoritative sequence number from server for this message
-			this.finalSeqByMessageId.set(envelope.messageId, envelope.sequenceId);
+			const displayId = this.toDisplayId(envelope.kind, envelope.messageId);
+			this.finalSeqByMessageId.set(displayId, envelope.sequenceId);
 			// Pass through completion envelope so handlers receive the final server sequenceId
-			const dto = handler.completeMessage(envelope.messageId, envelope);
+			const fixedEnv: MessageCompleteEventEnvelope = { ...envelope, messageId: displayId } as MessageCompleteEventEnvelope;
+			const dto = handler.completeMessage(displayId, fixedEnv);
 			
 			// Message completion is handled by the handler event listener
 			// The handler will emit a 'message_completed' event that we'll handle
@@ -167,9 +179,7 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			...state,
 			isStreaming: false,
 			currentMessageId: null,
-			currentTextDelta: '',
-			currentReasoningDelta: '',
-			currentReasoningVisibility: null,
+			streamingSnapshots: {},
 			error: null
 		}));
 
@@ -242,8 +252,8 @@ export class SlimChatSyncManager implements HandlerEventListener {
 	/**
 	 * Handle message completed by handler
 	 */
-	private onMessageCompleted(messageId: string, chatId: string, dto: MessageDto): void {
-		console.log(`Completing message ${messageId} with sequence ${dto.sequenceNumber}, messageType: ${dto.messageType}`);
+    private onMessageCompleted(messageId: string, chatId: string, dto: MessageDto): void {
+        console.log(`Completing message ${messageId} with sequence ${dto.sequenceNumber}, messageType: ${dto.messageType}`);
 		
 		// Preserve original messageType before any modifications
 		const originalMessageType = dto.messageType;
@@ -277,33 +287,34 @@ export class SlimChatSyncManager implements HandlerEventListener {
 		const currentChat = get(this.currentChatStore);
 		const existingMessage = currentChat?.messages.find(m => m.id === messageId);
 		
-		if (existingMessage) {
-			console.log(`Replacing existing placeholder for message ${messageId}`, {
-				oldMessageType: existingMessage.messageType,
-				newMessageType: dto.messageType
-			});
-			// Replace the placeholder with the final DTO
-			this.updateMessageInChat(messageId, dto);
-		} else {
-			console.log(`Adding late completion for message ${messageId} (no placeholder found)`);
-			// Add the completed message to chat - this handles late completions
-			// where the message completed after a new message started streaming
-			this.addMessageToChat(dto);
-		}
-		
-		// Clear streaming state if this was the active message
-		this.streamingStateStore.update(state => {
-			if (state.currentMessageId === messageId) {
-				return {
-					...state,
-					currentTextDelta: '',
-					currentReasoningDelta: '',
-					currentReasoningVisibility: null
-				};
-			}
-			return state;
-		});
-	}
+        if (existingMessage) {
+            console.log(`Replacing existing placeholder for message ${messageId}`, {
+                oldMessageType: existingMessage.messageType,
+                newMessageType: dto.messageType
+            });
+            // Replace the placeholder with the final DTO
+            this.updateMessageInChat(messageId, dto);
+        } else {
+            console.log(`Adding late completion for message ${messageId} (no placeholder found)`);
+            // Add the completed message to chat - this handles late completions
+            // where the message completed after a new message started streaming
+            this.addMessageToChat(dto);
+        }
+
+        // Mark snapshot as complete (retain entry for UI phase-based reactions)
+        this.streamingStateStore.update(state => {
+            const next: any = { ...state };
+            if (state.streamingSnapshots && state.streamingSnapshots[messageId]) {
+                next.streamingSnapshots = { ...state.streamingSnapshots };
+                next.streamingSnapshots[messageId] = {
+                    ...next.streamingSnapshots[messageId],
+                    isStreaming: false,
+                    phase: 'complete'
+                };
+            }
+            return next;
+        });
+    }
 
 	// ... (keep existing initialization and state management methods)
 	
@@ -362,14 +373,13 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			}
 		}
 
-		// Set streaming state true at start
+		// Set streaming state true at start; DO NOT clear existing snapshots here.
+		// Keeping snapshots allows previously-streamed-but-not-completed messages
+		// (e.g., prior turn's reasoning) to remain visible while new text streams.
 		this.streamingStateStore.update(s => ({
 			...s,
 			isStreaming: true,
 			currentMessageId: null,
-			currentTextDelta: '',
-			currentReasoningDelta: '',
-			currentReasoningVisibility: null,
 			error: null
 		}));
 	}
@@ -444,18 +454,27 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			snapshotIsStreaming: snapshot.isStreaming
 		});
 		
-		this.streamingStateStore.update(state => {
-			const next = { ...state, currentMessageId: state.currentMessageId ?? messageId };
-			if (messageType === 'text') {
-				next.currentTextDelta = snapshot.textDelta || '';
-				console.log('[SlimChatSyncManager] Set currentTextDelta to:', next.currentTextDelta);
-			} else if (messageType === 'reasoning') {
-				next.currentReasoningDelta = snapshot.reasoningDelta || '';
-				next.currentReasoningVisibility = snapshot.visibility ?? next.currentReasoningVisibility;
-				console.log('[SlimChatSyncManager] Set currentReasoningDelta to:', next.currentReasoningDelta);
-			}
-			return next;
-		});
+        this.streamingStateStore.update(state => {
+            // Always reflect the actively streaming message id so UI ties
+            // streaming state to the correct renderer (reasoning -> text, etc.)
+            const next: any = { ...state, currentMessageId: messageId, isStreaming: true };
+            const prev = state.streamingSnapshots || {};
+            // Mark all existing snapshots as not streaming to avoid cross-talk
+            const cleared: any = {};
+            for (const key in prev) {
+                cleared[key] = { ...prev[key], isStreaming: false };
+            }
+            const existing = cleared[messageId] || { messageType, isStreaming: true, phase: 'initial' };
+            const updated: any = { ...existing, messageType, isStreaming: true, phase: 'streaming' };
+            if (messageType === 'text') {
+                updated.textDelta = snapshot.textDelta || '';
+            } else if (messageType === 'reasoning') {
+                updated.reasoningDelta = snapshot.reasoningDelta || '';
+                updated.visibility = snapshot.visibility ?? existing.visibility ?? null;
+            }
+            next.streamingSnapshots = { ...cleared, [messageId]: updated };
+            return next;
+        });
 	}
 
 	private finalizeAllPendingMessages(): void {

@@ -34,10 +34,22 @@ export function registerBuiltInRenderers(): void {
 		messageType: 'reasoning'
 	};
 
+	// Register ToolCallRenderer for tool call message types
+	const toolCallRenderer: MessageRenderer<MessageDto> = {
+		messageType: 'tool_call'
+	};
+
+	// Register ToolResultRenderer for tool result message types
+	const toolResultRenderer: MessageRenderer<MessageDto> = {
+		messageType: 'tool_result'
+	};
+
 	registerRenderer('text', textRenderer, true);
 	registerRenderer('reasoning', reasoningRenderer, true);
+	registerRenderer('tool_call', toolCallRenderer, true);
+	registerRenderer('tool_result', toolResultRenderer, true);
 
-	console.info('Built-in message renderers registered successfully');
+	console.info('Built-in message renderers (including tools) registered successfully');
 }
 
 /**
@@ -53,6 +65,10 @@ export async function getRendererComponent(messageType: string): Promise<any> {
 			return (await import('../components/TextRenderer.svelte')).default;
 		case 'reasoning':
 			return (await import('../components/ReasoningRenderer.svelte')).default;
+		case 'tool_call':
+			return (await import('../components/ToolCallRenderer.svelte')).default;
+		case 'tool_result':
+			return (await import('../components/ToolResultRenderer.svelte')).default;
 		default:
 			console.warn(`No component found for message type '${messageType}', using fallback`);
 			return null;

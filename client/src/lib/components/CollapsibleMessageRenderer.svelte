@@ -29,14 +29,6 @@
 		toggleExpansion: { expanded: boolean } 
 	}>();
 
-	// Auto-collapse logic for non-latest messages
-	let hasCollapsedAfterStreaming = false;
-	$: if (!isLatest && collapsible && !hasManuallyToggled && expanded) {
-		expanded = false;
-		hasCollapsedAfterStreaming = true;
-		dispatch('stateChange', { expanded: false });
-	}
-
 	let hasManuallyToggled = false;
 	
 	function toggle() {

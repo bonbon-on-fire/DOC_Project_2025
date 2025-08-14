@@ -75,13 +75,21 @@ export interface ReasoningStreamChunkPayload extends StreamChunkPayload {
 }
 
 /**
+ * Payload for tool call update streaming chunks
+ * Matches: AIChat.Server.Services.ToolsCallUpdateStreamEvent
+ */
+export interface ToolCallUpdateStreamChunkPayload extends StreamChunkPayload {
+	toolCallUpdates?: any[]; // Tool call update objects
+}
+
+/**
  * Envelope for streaming chunk events (delta updates)
  * Matches: AIChat.Server.Models.SSE.StreamChunkEventEnvelope
  */
 export interface StreamChunkEventEnvelope extends SSEEventEnvelope {
 	messageId: string;
 	sequenceId: number;
-	payload: TextStreamChunkPayload | ReasoningStreamChunkPayload;
+	payload: TextStreamChunkPayload | ReasoningStreamChunkPayload | ToolCallUpdateStreamChunkPayload;
 }
 
 // ============================================================================
@@ -114,6 +122,14 @@ export interface ReasoningCompletePayload extends MessageCompletePayload {
 }
 
 /**
+ * Payload for completed tool call messages
+ * Matches: AIChat.Server.Models.SSE.ToolCallCompletePayload
+ */
+export interface ToolCallCompletePayload extends MessageCompletePayload {
+	toolCalls: any[]; // ToolCall[] from server
+}
+
+/**
  * Payload for usage information
  * Matches: AIChat.Server.Models.SSE.UsageCompletePayload
  */
@@ -128,7 +144,7 @@ export interface UsageCompletePayload extends MessageCompletePayload {
 export interface MessageCompleteEventEnvelope extends SSEEventEnvelope {
 	messageId: string;
 	sequenceId: number;
-	payload: TextCompletePayload | ReasoningCompletePayload | UsageCompletePayload;
+	payload: TextCompletePayload | ReasoningCompletePayload | ToolCallCompletePayload | UsageCompletePayload;
 }
 
 // ============================================================================
@@ -231,6 +247,10 @@ export namespace StreamChunkPayloadGuards {
 	export function isReasoningStreamChunk(payload: StreamChunkPayload): payload is ReasoningStreamChunkPayload {
 		return 'visibility' in (payload as any);
 	}
+
+	export function isToolCallUpdateStreamChunk(payload: StreamChunkPayload): payload is ToolCallUpdateStreamChunkPayload {
+		return 'toolCallUpdates' in (payload as any);
+	}
 }
 
 /**
@@ -243,6 +263,10 @@ export namespace MessageCompletePayloadGuards {
 
 	export function isReasoningComplete(payload: MessageCompletePayload): payload is ReasoningCompletePayload {
 		return 'reasoning' in payload;
+	}
+
+	export function isToolCallComplete(payload: MessageCompletePayload): payload is ToolCallCompletePayload {
+		return 'toolCalls' in payload;
 	}
 
 	export function isUsageComplete(payload: MessageCompletePayload): payload is UsageCompletePayload {

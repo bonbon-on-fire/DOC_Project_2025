@@ -4,6 +4,7 @@ import type { ChatDto, CreateChatRequest } from '$lib/types/chat';
 import type { StreamingUIState } from '$lib/chat/types';
 import { HandlerBasedSSEOrchestrator } from '$lib/chat/handlerBasedOrchestrator';
 import { apiClient } from '$lib/api/client';
+import { logger } from '$lib/utils/logger';
 
 // Chat state stores
 export const currentChatId = writable<string | null>(null);
@@ -16,24 +17,14 @@ export const error = writable<string | null>(null);
 export const streamingState = writable<StreamingUIState>({
 	isStreaming: false,
 	currentMessageId: null,
-	currentTextDelta: '',
-	currentReasoningDelta: '',
-	currentReasoningVisibility: null,
+	streamingSnapshots: {},
 	error: null
 });
 
 // Legacy stores for backward compatibility
-export const isStreaming = derived(streamingState, $state => {
-	console.log('[chat.ts] isStreaming derived:', $state.isStreaming);
-	return $state.isStreaming;
-});
-export const currentStreamingMessage = derived(streamingState, $state => {
-	console.log('[chat.ts] currentStreamingMessage derived:', $state.currentTextDelta);
-	return $state.currentTextDelta;
-});
-export const currentReasoningMessage = derived(streamingState, $state => $state.currentReasoningDelta);
-export const currentReasoningVisibility = derived(streamingState, $state => $state.currentReasoningVisibility);
+export const isStreaming = derived(streamingState, $state => $state.isStreaming);
 export const currentStreamingMessageId = derived(streamingState, $state => $state.currentMessageId);
+export const streamingSnapshots = derived(streamingState, $state => $state.streamingSnapshots);
 
 // User state (mock for now - will be replaced with actual auth)
 export const currentUser = writable({
@@ -71,18 +62,28 @@ export const currentChatMessages = derived([currentChat], ([chat]) => {
 export const chatActions = {
 	// Load chat history
 	async loadChatHistory(): Promise<void> {
+		logger.trace({ operation: 'loadChatHistory' }, 'Starting to load chat history');
 		try {
 			isLoading.set(true);
 			error.set(null);
 
 			const user = get(currentUser);
+			logger.trace({ userId: user.id, operation: 'loadChatHistory' }, 'Loading chat history for user');
+			
 			const response = await apiClient.getChatHistory(user.id);
+			logger.trace({ 
+				chatCount: response.chats?.length || 0, 
+				operation: 'loadChatHistory' 
+			}, 'Chat history loaded successfully');
+			
 			chats.set(response.chats);
 		} catch (err) {
-			error.set(err instanceof Error ? err.message : 'Failed to load chat history');
-			console.error('Failed to load chat history:', err);
+			const errorMessage = err instanceof Error ? err.message : 'Failed to load chat history';
+			error.set(errorMessage);
+			logger.error({ error: err, operation: 'loadChatHistory' }, 'Failed to load chat history');
 		} finally {
 			isLoading.set(false);
+			logger.trace({ operation: 'loadChatHistory' }, 'Finished loading chat history');
 		}
 	},
 
@@ -246,9 +247,7 @@ export const chatActions = {
 		streamingState.set({
 			isStreaming: false,
 			currentMessageId: null,
-			currentTextDelta: '',
-			currentReasoningDelta: '',
-			currentReasoningVisibility: null,
+			streamingSnapshots: {},
 			error: null
 		});
 	}

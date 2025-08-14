@@ -7,6 +7,7 @@
 		messageStates,
 		type MessageState
 	} from '$lib/stores/messageState';
+	import { streamingSnapshots } from '$lib/stores/chat';
 	import type { RichMessageDto } from '$lib/types';
 	import MessageBubble from './MessageBubble.svelte';
 
@@ -25,6 +26,12 @@
 	// Current message state from store
 	$: currentMessageState = $messageStates[message.id];
 
+	// Message-specific snapshot tracking to avoid over-broad reactive updates
+	$: messageSnapshot = $streamingSnapshots?.[message.id];
+	$: messageSnapshotPhase = messageSnapshot?.phase;
+	$: messageSnapshotIsStreaming = messageSnapshot?.isStreaming;
+	$: messageSnapshotType = messageSnapshot?.messageType;
+
 	/**
 	 * Attempts to resolve the appropriate renderer for the message type.
 	 * Falls back to MessageBubble on any error.
@@ -36,13 +43,6 @@
 
 			// Determine the effective message type with better debugging
 			const effectiveMessageType = message.messageType || 'text';
-			console.log(`MessageRouter resolving renderer for message ${message.id}:`, {
-				originalMessageType: message.messageType,
-				effectiveMessageType,
-				role: message.role,
-				hasReasoning: 'reasoning' in message,
-				hasText: 'text' in message
-			});
 
 			// Get renderer from registry
 			const renderer = getRenderer(effectiveMessageType);
@@ -51,9 +51,6 @@
 			const RendererComponentModule = await getRendererComponent(effectiveMessageType);
 
 			if (RendererComponentModule && renderer.messageType !== 'fallback') {
-				console.info(
-					`Using ${renderer.messageType} renderer for message type '${effectiveMessageType}'`
-				);
 				RendererComponent = RendererComponentModule;
 				fallbackToMessageBubble = false;
 			} else {
@@ -123,22 +120,29 @@
 		handleStateChange({ expanded: isLatest });
 	}
 
-	// Reactive statement for render phase tracking
-	$: if (mounted && currentMessageState) {
-		// Update render phase based on message streaming state
-		// Support different message payload shapes (text/reasoning), fallback to empty
-		const getMessageContent = (m: any): string => {
-			if (typeof m?.text === 'string') return m.text;
-			if (typeof m?.reasoning === 'string') return m.reasoning;
-			if (typeof (m as any)?.reasoning === 'string') return (m as any).reasoning; // legacy fallback
-			return '';
-		};
-
-		const isStreaming = getMessageContent(message).includes('▋'); // Simple streaming detection
-		const newPhase = isStreaming ? 'streaming' : 'complete';
-
-		if (currentMessageState.renderPhase !== newPhase) {
+	// Reactive: drive render phase and expansion from external policy and snapshots
+	// Now uses message-specific values to prevent unnecessary updates
+	$: if (mounted && message?.id && messageSnapshotPhase !== undefined) {
+		const newPhase = messageSnapshotPhase === 'streaming' ? 'streaming' : 
+						(messageSnapshotPhase === 'complete' ? 'complete' : 
+						 (currentMessageState?.renderPhase ?? 'initial'));
+		
+		if (currentMessageState?.renderPhase !== newPhase) {
 			handleStateChange({ renderPhase: newPhase });
+		}
+	}
+
+	// Separate reactive statement for expansion logic to minimize update frequency
+	$: if (mounted && message?.id && messageSnapshot) {
+		if (messageSnapshotIsStreaming && !currentMessageState?.expanded) {
+			// Expand while streaming
+			handleStateChange({ expanded: true });
+		} else if (!messageSnapshotIsStreaming && 
+				   messageSnapshotType === 'reasoning' && 
+				   messageSnapshotPhase === 'complete' && 
+				   currentMessageState?.expanded) {
+			// Collapse reasoning on completion; text stays as-is
+			handleStateChange({ expanded: false });
 		}
 	}
 </script>

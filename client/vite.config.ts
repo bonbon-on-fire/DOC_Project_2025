@@ -35,11 +35,12 @@ export default defineConfig({
 		]
 	},
 	server: {
-		proxy: {
-			'/api': {
-				target: 'http://localhost:5130',
-				changeOrigin: true
-			}
-		}
+    proxy: {
+        '/api': {
+            // Keep in sync with server dev port; default docs use 5099
+            target: 'http://localhost:5099',
+            changeOrigin: true
+        }
+    }
 	}
 });

@@ -13,13 +13,21 @@
  * Streaming UI state for the chat interface
  * Used to track current streaming status across all message types
  */
+export interface UIStreamingSnapshot {
+    messageType: string;
+    isStreaming: boolean;
+    phase: 'initial' | 'streaming' | 'complete';
+    // Optional deltas depending on messageType
+    textDelta?: string;
+    reasoningDelta?: string;
+    visibility?: 'Plain' | 'Summary' | 'Encrypted' | null;
+}
+
 export interface StreamingUIState {
-	isStreaming: boolean;
-	currentMessageId: string | null;
-	currentTextDelta: string;
-	currentReasoningDelta: string;
-	currentReasoningVisibility: string | null;
-	error: string | null;
+    isStreaming: boolean;
+    currentMessageId: string | null;
+    streamingSnapshots: Record<string, UIStreamingSnapshot>;
+    error: string | null;
 }
 
 /**

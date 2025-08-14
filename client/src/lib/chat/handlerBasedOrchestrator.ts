@@ -19,6 +19,7 @@ import type { MessageHandlerRegistry } from './messageHandlers';
 import { createMessageHandlerRegistry } from './messageHandlerRegistry';
 import { createTextMessageHandler } from './handlers/textMessageHandler';
 import { createReasoningMessageHandler } from './handlers/reasoningMessageHandler';
+import { createToolCallMessageHandler } from './handlers/toolCallMessageHandler';
 import { createSlimChatSyncManager } from './slimChatSyncManager';
 import { createSSEParser } from './sseParser';
 import { apiClient } from '$lib/api/client';
@@ -69,6 +70,7 @@ export class HandlerBasedSSEOrchestrator {
 		// Register handlers with the sync manager as listener
 		this.handlerRegistry.register(createTextMessageHandler(this.chatSyncManager));
 		this.handlerRegistry.register(createReasoningMessageHandler(this.chatSyncManager));
+		this.handlerRegistry.register(createToolCallMessageHandler(this.chatSyncManager));
 	}
 
 	/**
@@ -332,9 +334,7 @@ export class HandlerBasedSSEOrchestrator {
 		this.streamingStateStore.set({
 			isStreaming: false,
 			currentMessageId: null,
-			currentTextDelta: '',
-			currentReasoningDelta: '',
-			currentReasoningVisibility: null,
+			streamingSnapshots: {},
 			error: null
 		});
 	}

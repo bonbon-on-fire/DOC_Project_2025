@@ -1,25 +1,32 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace AIChat.Server.Services.TestMode;
 
 public sealed class TestSseMessageHandler : HttpMessageHandler
 {
-    public int WordsPerChunk { get; set; } = 5;
+    private static readonly ILogger? Logger = null; // Disable logging to avoid null issues
+    
+    public int WordsPerChunk { get; set; } = 10;
     public int ChunkDelayMs { get; set; } = 100;
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        Logger?.LogTrace("SendAsync called - Method: {Method}, URI: {Uri}", request.Method, request.RequestUri);
         if (request.Method != HttpMethod.Post || request.RequestUri == null)
         {
+            Logger?.LogTrace("Not POST or no URI, returning 404");
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
 
         if (!request.RequestUri.AbsolutePath.EndsWith("/v1/chat/completions", StringComparison.OrdinalIgnoreCase))
         {
+            Logger?.LogTrace("Path doesn't match /v1/chat/completions: {Path}", request.RequestUri.AbsolutePath);
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
+        Logger?.LogTrace("Processing chat completions request");
 
         string body = request.Content == null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(body))
@@ -116,22 +123,28 @@ public sealed class TestSseMessageHandler : HttpMessageHandler
 
     private static (InstructionPlan? plan, string fallback) TryParseInstructionPlan(string userMessage)
     {
+        Logger?.LogTrace("Parsing user message: {UserMessage}", userMessage);
         const string startTag = "<|instruction_start|>";
         const string endTag = "<|instruction_end|>";
         var start = userMessage.IndexOf(startTag, StringComparison.Ordinal);
         var end = userMessage.IndexOf(endTag, StringComparison.Ordinal);
+        Logger?.LogTrace("Start index: {Start}, End index: {End}", start, end);
         if (start < 0 || end <= start)
         {
+            Logger?.LogTrace("Instruction tags not found, using fallback");
             return (null, userMessage);
         }
 
         var jsonSpan = userMessage.Substring(start + startTag.Length, end - (start + startTag.Length)).Trim();
+        Logger?.LogTrace("Extracted JSON: {JsonSpan}", jsonSpan);
         try
         {
             using var doc = JsonDocument.Parse(jsonSpan);
             var root = doc.RootElement;
+            Logger?.LogTrace("Parsed JSON successfully, ValueKind: {ValueKind}", root.ValueKind);
             if (root.ValueKind != JsonValueKind.Object)
             {
+                Logger?.LogTrace("Root is not an object, using fallback");
                 return (null, userMessage);
             }
 
@@ -163,6 +176,7 @@ public sealed class TestSseMessageHandler : HttpMessageHandler
                     }
                     if (item.TryGetProperty("tool_call", out var toolEl) && toolEl.ValueKind == JsonValueKind.Array)
                     {
+                        Logger?.LogTrace("Found tool_call array");
                         var calls = new List<InstructionToolCall>();
                         foreach (var call in toolEl.EnumerateArray())
                         {
@@ -170,9 +184,11 @@ public sealed class TestSseMessageHandler : HttpMessageHandler
                             var name = call.TryGetProperty("name", out var nEl) && nEl.ValueKind == JsonValueKind.String ? (nEl.GetString() ?? string.Empty) : string.Empty;
                             var argsObj = call.TryGetProperty("args", out var aEl) ? aEl : default;
                             var argsJson = argsObj.ValueKind != JsonValueKind.Undefined ? argsObj.GetRawText() : "{}";
+                            Logger?.LogTrace("Tool call: {Name}, Args: {Args}", name, argsJson);
                             calls.Add(new InstructionToolCall(name, argsJson));
                         }
                         messages.Add(InstructionMessage.ForToolCalls(calls));
+                        Logger?.LogTrace("Added {Count} tool calls to messages", calls.Count);
                         continue;
                     }
                 }

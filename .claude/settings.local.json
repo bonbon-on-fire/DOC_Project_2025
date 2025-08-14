@@ -2,7 +2,23 @@
   "permissions": {
     "allow": [
       "Bash(npm run test:e2e:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(find:*)",
+      "Bash(curl:*)",
+      "Bash(npm run check:*)",
+      "Bash(duckdb:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm install pino pino-pretty)",
+      "Bash(dotnet build)",
+      "Bash(cp:*)",
+      "Bash(npx playwright test:*)",
+      "Bash($env:ASPNETCORE_ENVIRONMENT='Test')",
+      "Bash($env:LLM_API_KEY='DUMMY')",
+      "Bash(dotnet run:*)",
+      "Bash(set ASPNETCORE_ENVIRONMENT=Test)",
+      "Bash(set LLM_API_KEY=DUMMY)",
+      "Bash(node:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

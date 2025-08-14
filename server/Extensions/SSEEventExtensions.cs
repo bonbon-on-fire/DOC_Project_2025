@@ -13,10 +13,9 @@ public static class SSEEventExtensions
     /// Convert a StreamChunkEvent to the appropriate SSE envelope
     /// </summary>
     public static StreamChunkEventEnvelope ToSSEEnvelope(
-        this StreamChunkEvent streamEvent, 
-        int sequenceId)
+        this StreamChunkEvent streamEvent)
     {
-    object payload = streamEvent switch
+        object payload = streamEvent switch
         {
             TextStreamEvent textEvent => new TextStreamChunkPayload
             {
@@ -28,6 +27,11 @@ public static class SSEEventExtensions
                 Delta = reasoningEvent.Delta,
                 Visibility = reasoningEvent.Visibility?.ToString().ToLowerInvariant()
             },
+            ToolsCallUpdateStreamEvent toolCallUpdateEvent => new ToolCallUpdateStreamChunkPayload
+            {
+                Delta = "",
+                ToolCallUpdate = toolCallUpdateEvent.ToolCallUpdate
+            },
             _ => throw new InvalidOperationException($"Unsupported stream event type: {streamEvent.GetType().Name}")
         };
 
@@ -36,7 +40,7 @@ public static class SSEEventExtensions
             ChatId = streamEvent.ChatId,
             MessageId = streamEvent.MessageId,
             Kind = streamEvent.Kind,
-            SequenceId = sequenceId,
+            SequenceId = streamEvent.SequenceNumber,
             Payload = payload
         };
 
@@ -46,9 +50,7 @@ public static class SSEEventExtensions
     /// <summary>
     /// Convert a MessageEvent to the appropriate SSE envelope
     /// </summary>
-    public static MessageCompleteEventEnvelope ToSSEEnvelope(
-        this MessageEvent messageEvent, 
-        int sequenceId)
+    public static MessageCompleteEventEnvelope ToSSEEnvelope(this MessageEvent messageEvent)
     {
         object payload = messageEvent switch
         {
@@ -60,6 +62,10 @@ public static class SSEEventExtensions
             {
                 Reasoning = reasoningEvent.Reasoning,
                 Visibility = reasoningEvent.Visibility?.ToString().ToLowerInvariant()
+            },
+            ToolCallEvent toolCallEvent => new ToolCallCompletePayload
+            {
+                ToolCalls = toolCallEvent.ToolCalls
             },
             UsageEvent usageEvent => new UsageCompletePayload
             {
@@ -73,7 +79,7 @@ public static class SSEEventExtensions
             ChatId = messageEvent.ChatId,
             MessageId = messageEvent.MessageId,
             Kind = messageEvent.Kind,
-            SequenceId = sequenceId,
+            SequenceId = messageEvent.SequenceNumber,
             Payload = payload
         };
 

@@ -3,7 +3,7 @@
 	import CollapsibleMessageRenderer from '$lib/components/CollapsibleMessageRenderer.svelte';
 	import type { ReasoningMessageDto, RichMessageDto } from '$lib/types';
 	import type { MessageRenderer } from '$lib/types/renderer';
-	import { currentReasoningMessage, isStreaming, currentStreamingMessageId } from '$lib/stores/chat';
+	import { streamingSnapshots } from '$lib/stores/chat';
 
 	// Component props with proper TypeScript typing
 	export let message: ReasoningMessageDto & RichMessageDto;
@@ -11,7 +11,6 @@
 	export let isLastAssistantMessage: boolean = false;
 	// Props driven by MessageRouter for expansion and render phase
 	export let expanded: boolean = true;
-	export let renderPhase: 'initial' | 'streaming' | 'complete' = 'initial';
 
 	const dispatch = createEventDispatcher<{ stateChange: { expanded: boolean }; toggleExpansion: { expanded: boolean } }>();
 
@@ -44,15 +43,8 @@
 		messageType: 'reasoning'
 	};
 
-	// Track whether we've auto-collapsed after streaming finished to avoid loops
-	let hasCollapsedAfterStreaming = false;
-
-	// Use either parent-provided renderPhase or live stores to determine streaming state for this message
-	$: isStreamingForThis =
-		message.role === 'assistant' && (
-			renderPhase === 'streaming' ||
-			($isStreaming && (!$currentStreamingMessageId || $currentStreamingMessageId === message.id))
-		);
+// Streaming state for this message comes solely from its snapshot
+$: isStreamingForThis = Boolean($streamingSnapshots?.[message.id]?.isStreaming);
 
 	// Touch isLastAssistantMessage to avoid unused export warning (can be used for further UX tweaks)
 	$: if (isLastAssistantMessage !== undefined) {
@@ -62,18 +54,16 @@
 	// Ensure reasoning is expanded while streaming
 	$: if (isStreamingForThis && !expanded) {
 		dispatch('stateChange', { expanded: true });
-		hasCollapsedAfterStreaming = false;
 	}
 
-	// Auto-collapse once streaming for this message ends; user can re-toggle later
-	$: if (!isStreamingForThis && !hasCollapsedAfterStreaming && expanded) {
-		// Collapse exactly once post-streaming
-		dispatch('stateChange', { expanded: false });
-		hasCollapsedAfterStreaming = true;
-	}
 
-	// Compute reasoning text for use in collapsed preview
-	$: reasoningText = getReasoningText(message);
+	// Compute reasoning text for use in collapsed preview; fall back to per-message delta if final text absent
+	$: reasoningText = (() => {
+		const dtoText = getReasoningText(message);
+		if (dtoText && dtoText.trim()) return dtoText;
+		const snap = $streamingSnapshots?.[message.id];
+		return (snap?.reasoningDelta || '');
+	})();
 	$: collapsedPreview = reasoningText.length > 60 
 		? reasoningText.substring(0, 60) + '...' 
 		: reasoningText;
@@ -131,20 +121,19 @@
 	>
 		{#if isStreamingForThis}
 			<!-- Show reasoning while its own message is streaming, or before text message id is known -->
-			{#if $currentReasoningMessage.trim()}
+			{#if (($streamingSnapshots?.[message.id]?.reasoningDelta || '')).trim()}
 				<div
 					class="mb-2 border-l-2 border-amber-300 pl-2 text-xs text-amber-600 dark:border-amber-600 dark:text-amber-400"
 					data-testid="streaming-reasoning-content"
 				>
-					{@html formatContent($currentReasoningMessage)}
+					{@html formatContent(($streamingSnapshots?.[message.id]?.reasoningDelta || ''))}
 				</div>
 			{/if}
 			<span class="animate-pulse">▋</span>
 		{:else}
-			{@html formatContent(getReasoningText(message))}
+			<!-- When not streaming, render final reasoning if present; otherwise fall back to this message's snapshot delta -->
+			{@html formatContent(reasoningText)}
 		{/if}
 	</div>
 </CollapsibleMessageRenderer>
 </div>
-
-
