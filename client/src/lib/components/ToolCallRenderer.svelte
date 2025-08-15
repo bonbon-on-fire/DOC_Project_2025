@@ -23,14 +23,25 @@
 
 	// Extract tool calls from message
 	function getToolCalls(msg: any): Array<{name: string, args: any, id?: string}> {
-		if (msg.toolCalls) return msg.toolCalls;
-		if (msg.tool_calls) return msg.tool_calls;
+		console.log('[ToolCallRenderer] Extracting tool calls from message:', msg);
+		if (msg.toolCalls) {
+			console.log('[ToolCallRenderer] Found toolCalls:', msg.toolCalls);
+			return msg.toolCalls;
+		}
+		if (msg.tool_calls) {
+			console.log('[ToolCallRenderer] Found tool_calls:', msg.tool_calls);
+			return msg.tool_calls;
+		}
 		if (msg.content && typeof msg.content === 'string') {
 			try {
 				const parsed = JSON.parse(msg.content);
-				if (parsed.tool_calls) return parsed.tool_calls;
+				if (parsed.tool_calls) {
+					console.log('[ToolCallRenderer] Found tool_calls in content:', parsed.tool_calls);
+					return parsed.tool_calls;
+				}
 			} catch {}
 		}
+		console.log('[ToolCallRenderer] No tool calls found');
 		return [];
 	}
 

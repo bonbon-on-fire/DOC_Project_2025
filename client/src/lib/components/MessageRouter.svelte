@@ -33,6 +33,30 @@
 	$: messageSnapshotType = messageSnapshot?.messageType;
 
 	/**
+	 * Checks if a message contains math-related tool calls
+	 */
+	function hasMathToolCalls(msg: RichMessageDto): boolean {
+		const toolCalls = [];
+		if ((msg as any).toolCalls) toolCalls.push(...(msg as any).toolCalls);
+		if ((msg as any).tool_calls) toolCalls.push(...(msg as any).tool_calls);
+		if ((msg as any).content && typeof (msg as any).content === 'string') {
+			try {
+				const parsed = JSON.parse((msg as any).content);
+				if (parsed.tool_calls) toolCalls.push(...parsed.tool_calls);
+			} catch {}
+		}
+		
+		return toolCalls.some(tc => 
+			tc.name && (
+				tc.name.toLowerCase().includes('math') ||
+				tc.name.toLowerCase().includes('calc') ||
+				tc.name.toLowerCase().includes('compute') ||
+				tc.name.toLowerCase().includes('evaluate')
+			)
+		);
+	}
+
+	/**
 	 * Attempts to resolve the appropriate renderer for the message type.
 	 * Falls back to MessageBubble on any error.
 	 */
@@ -42,7 +66,12 @@
 			fallbackToMessageBubble = false;
 
 			// Determine the effective message type with better debugging
-			const effectiveMessageType = message.messageType || 'text';
+			let effectiveMessageType = message.messageType || 'text';
+			
+			// Special handling for tool calls - check if they're math-related
+			if (effectiveMessageType === 'tool_call' && hasMathToolCalls(message)) {
+				effectiveMessageType = 'math_tool';
+			}
 
 			// Get renderer from registry
 			const renderer = getRenderer(effectiveMessageType);
@@ -191,6 +220,20 @@
 
 	<!-- Dynamic component rendering -->
 	{#if RendererComponent}
+		{#if message.messageType === 'tool_call'}
+			{@const logMessage = (() => {
+				console.log('[MessageRouter] Passing to ToolCallRenderer:', {
+					messageId: message.id,
+					messageType: message.messageType,
+					toolCalls: (message as any).toolCalls,
+					tool_calls: (message as any).tool_calls,
+					content: (message as any).content,
+					role: message.role,
+					renderPhase: currentMessageState?.renderPhase ?? 'initial'
+				});
+				return null;
+			})()}
+		{/if}
 		<svelte:component
 			this={RendererComponent}
 			{message}

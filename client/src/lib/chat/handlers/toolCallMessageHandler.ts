@@ -15,6 +15,7 @@ import type {
 	StreamChunkEventEnvelope, 
 	MessageCompleteEventEnvelope,
 	ToolCallUpdateStreamChunkPayload,
+	ToolCallUpdate,
 	ToolCallCompletePayload
 } from '../sseEventTypes';
 import { 
@@ -123,26 +124,67 @@ export class ToolCallMessageHandler extends BaseMessageHandler {
 		
 		const toolCallPayload = envelope.payload as ToolCallUpdateStreamChunkPayload;
 		
-		// Process tool call updates from payload
-		if (toolCallPayload.toolCallUpdates && Array.isArray(toolCallPayload.toolCallUpdates)) {
+		// Process single tool call update from payload (server sends one per chunk)
+		if (toolCallPayload.toolCallUpdate) {
+				const toolCallUpdate: ToolCallUpdate = toolCallPayload.toolCallUpdate;
+				console.log('[ToolCallMessageHandler] Processing tool call update:', {
+					toolCallUpdate,
+					hasToolCallId: !!toolCallUpdate.tool_call_id,
+					hasFunctionName: !!toolCallUpdate.function_name,
+					hasFunctionArgs: !!toolCallUpdate.function_args,
+					hasIndex: toolCallUpdate.index !== undefined
+				});
 				const currentToolCalls = snapshot.toolCalls || [];
-				const newToolCalls = [...currentToolCalls];
+				const toolCallsMap = new Map<string, any>();
 				
-				// Process each tool call update (simpler approach for JSON fragments)
-				toolCallPayload.toolCallUpdates.forEach((toolCallUpdate: any) => {
-					// For tool call updates, we expect the full structure to be provided
-					// and we'll handle it as JSON fragments for progressive rendering
-					const toolCall = {
-						name: toolCallUpdate.name || '',
-						args: toolCallUpdate.arguments || {},
-						argsJson: JSON.stringify(toolCallUpdate.arguments || {}),
-						id: toolCallUpdate.id
-					};
-					
-					newToolCalls.push(toolCall);
+				// First, add existing tool calls to the map
+				currentToolCalls.forEach((tc: any) => {
+					toolCallsMap.set(tc.id, tc);
 				});
 				
-				console.log('[ToolCallMessageHandler] Updated tool calls:', newToolCalls);
+				// Process the tool call update - use tool_call_id from server or index
+				const toolCallId = toolCallUpdate.tool_call_id || 
+					`${messageId}_tool_${toolCallUpdate.index || 0}`;
+				
+				// Get existing tool call or create new one
+				const existingToolCall = toolCallsMap.get(toolCallId) || {
+					id: toolCallId,
+					name: '',
+					args: {},
+					argsJson: ''
+				};
+				
+				// Update with new data from this chunk
+				if (toolCallUpdate.function_name) {
+					existingToolCall.name = toolCallUpdate.function_name;
+				}
+				
+				// Accumulate function arguments (streaming JSON fragments)
+				if (toolCallUpdate.function_args) {
+					existingToolCall.argsJson = (existingToolCall.argsJson || '') + toolCallUpdate.function_args;
+					try {
+						// Try to parse accumulated JSON
+						existingToolCall.args = JSON.parse(existingToolCall.argsJson);
+					} catch {
+						// Keep as partial JSON string if not yet complete
+						existingToolCall.args = { partial: existingToolCall.argsJson };
+					}
+				}
+				
+				toolCallsMap.set(toolCallId, existingToolCall);
+				
+				// Convert map back to array
+				const newToolCalls = Array.from(toolCallsMap.values());
+				
+				console.log('[ToolCallMessageHandler] Updated tool calls:', {
+					count: newToolCalls.length,
+					toolCalls: newToolCalls.map(tc => ({
+						id: tc.id,
+						name: tc.name,
+						hasArgs: !!tc.args,
+						argsJson: tc.argsJson?.substring(0, 50) + '...'
+					}))
+				});
 				
 				return this.updateSnapshot(messageId, {
 					toolCalls: newToolCalls,
@@ -158,6 +200,12 @@ export class ToolCallMessageHandler extends BaseMessageHandler {
 	 * Complete tool call message with final content
 	 */
 	completeMessage(messageId: string, envelope: MessageCompleteEventEnvelope): MessageDto {
+		console.log('[ToolCallMessageHandler] Completing message:', {
+			messageId,
+			kind: envelope.kind,
+			payload: envelope.payload
+		});
+		
 		let snapshot = this.getSnapshot(messageId);
 		
 		if (!snapshot) {
@@ -171,6 +219,11 @@ export class ToolCallMessageHandler extends BaseMessageHandler {
 		
 		const toolCallPayload = envelope.payload as ToolCallCompletePayload;
 		
+		console.log('[ToolCallMessageHandler] Final tool calls from completion:', {
+			count: toolCallPayload.toolCalls?.length || 0,
+			toolCalls: toolCallPayload.toolCalls
+		});
+		
 		// Update snapshot with final tool calls
 		const finalSnapshot = this.updateSnapshot(messageId, {
 			toolCalls: toolCallPayload.toolCalls,
@@ -180,6 +233,13 @@ export class ToolCallMessageHandler extends BaseMessageHandler {
 		
 		// Convert to DTO
 		const dto = this.snapshotToDto(finalSnapshot);
+		console.log('[ToolCallMessageHandler] Final DTO:', {
+			id: dto.id,
+			messageType: dto.messageType,
+			toolCallsCount: dto.toolCalls?.length || 0,
+			toolCalls: dto.toolCalls
+		});
+		
 		this.emitEvent('message_completed', messageId, envelope.chatId, dto);
 		
 		return dto;

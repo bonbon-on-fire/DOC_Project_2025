@@ -18,9 +18,19 @@
       "Bash(set ASPNETCORE_ENVIRONMENT=Test)",
       "Bash(set LLM_API_KEY=DUMMY)",
       "Bash(node:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(dotnet test:*)",
+      "Bash(dotnet build:*)",
+      "Bash(npm run test:unit:*)",
+      "Bash(npm run build:*)",
+      "Bash(taskkill:*)",
+      "mcp__playwright__playwright_navigate",
+      "Bash(npx playwright install:*)",
+      "Bash(powershell:*)",
+      "WebSearch"
     ],
     "deny": [],
-    "ask": []
+    "ask": [],
+    "defaultMode": "acceptEdits"
   }
 }

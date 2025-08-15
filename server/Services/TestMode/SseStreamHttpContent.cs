@@ -141,7 +141,7 @@ public sealed class SseStreamHttpContent : HttpContent
         using var writer = new StreamWriter(stream, new UTF8Encoding(false), 1024, leaveOpen: true) { AutoFlush = false };
 
         var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var id = $"gen-{created}-{Guid.NewGuid().ToString("N")[..16]}";
+        var generationId = $"gen-{created}-{Guid.NewGuid().ToString("N")[..16]}";
 
         async Task WriteSseAsync(object payload)
         {
@@ -206,13 +206,13 @@ public sealed class SseStreamHttpContent : HttpContent
             maxMessageIdx = 0;
         }
 
-        var gen_id = $"gen-{created}-{Guid.NewGuid().ToString("N")[..16]}";
+        // Use the same generation ID for all chunks in this response
         choices = choices.Concat([BuildFinishChunk(maxMessageIdx)]);
         foreach (var choice in choices)
         {
             var responseMessage = new ChatCompletionResponse
             {
-                Id = gen_id,
+                Id = generationId,
                 VarObject = "chat.completion.chunk",
                 Created = (int)created,
                 Model = _model ?? "test-model",
@@ -427,6 +427,8 @@ public sealed class SseStreamHttpContent : HttpContent
         {
             idx++;
             var tool_call_id = Guid.NewGuid().ToString();
+            // First chunk: function name with empty arguments
+            // This matches OpenAI's actual behavior
             yield return new Choice
             {
                 Index = index,
@@ -444,6 +446,8 @@ public sealed class SseStreamHttpContent : HttpContent
                 }
             };
 
+            // Subsequent chunks: NO function name, only argument fragments
+            // OpenAI omits the function name in subsequent chunks (not empty string)
             for (int i = 0; i < argsJson.Length; i += wordsPerChunk)
             {
                 var len = Math.Min(wordsPerChunk, argsJson.Length - i);
@@ -456,7 +460,7 @@ public sealed class SseStreamHttpContent : HttpContent
                         ToolCalls = [
                             new FunctionContent(
                                 tool_call_id,
-                                new FunctionCall(string.Empty, argsJson.Substring(i, len)))
+                                new FunctionCall(null, argsJson.Substring(i, len)))
                             {
                                 Index = idx,
                             }

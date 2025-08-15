@@ -75,11 +75,22 @@ export interface ReasoningStreamChunkPayload extends StreamChunkPayload {
 }
 
 /**
+ * Tool call update structure from server
+ * Matches: AchieveAi.LmDotnetTools.LmCore.Messages.ToolCallUpdate
+ */
+export interface ToolCallUpdate {
+	tool_call_id?: string;
+	index?: number;
+	function_name?: string;
+	function_args?: string;
+}
+
+/**
  * Payload for tool call update streaming chunks
  * Matches: AIChat.Server.Services.ToolsCallUpdateStreamEvent
  */
 export interface ToolCallUpdateStreamChunkPayload extends StreamChunkPayload {
-	toolCallUpdates?: any[]; // Tool call update objects
+	toolCallUpdate?: ToolCallUpdate; // Single tool call update object from server
 }
 
 /**
@@ -210,18 +221,25 @@ export namespace SSEEventGuards {
 	export function isStreamChunkEvent(envelope: SSEEventEnvelope): envelope is StreamChunkEventEnvelope {
 		if (!('messageId' in envelope) || !('sequenceId' in envelope) || !('payload' in envelope)) return false;
 		const payload: any = (envelope as any).payload;
-		// Heuristics: chunk payloads include delta; text chunk also has done flag present (boolean)
-		return typeof payload === 'object' && payload != null && 'delta' in payload && (
-			'done' in payload || 'visibility' in payload || Object.keys(payload).length === 1 // delta-only
+		// Check for different types of streaming chunks:
+		// - Text/reasoning chunks have 'delta' property
+		// - Tool call updates have 'toolCallUpdate' property
+		return typeof payload === 'object' && payload != null && (
+			// Text or reasoning chunk
+			('delta' in payload && (
+				'done' in payload || 'visibility' in payload || Object.keys(payload).length === 1 // delta-only
+			)) ||
+			// Tool call update chunk
+			'toolCallUpdate' in payload
 		);
 	}
 
 	export function isMessageCompleteEvent(envelope: SSEEventEnvelope): envelope is MessageCompleteEventEnvelope {
 		if (!('messageId' in envelope) || !('sequenceId' in envelope) || !('payload' in envelope)) return false;
 		const payload: any = (envelope as any).payload;
-		// Completion payloads have final fields like text, reasoning, or usage
+		// Completion payloads have final fields like text, reasoning, usage, or toolCalls
 		return typeof payload === 'object' && payload != null && (
-			'text' in payload || 'reasoning' in payload || 'usage' in payload
+			'text' in payload || 'reasoning' in payload || 'usage' in payload || 'toolCalls' in payload
 		);
 	}
 
@@ -249,7 +267,7 @@ export namespace StreamChunkPayloadGuards {
 	}
 
 	export function isToolCallUpdateStreamChunk(payload: StreamChunkPayload): payload is ToolCallUpdateStreamChunkPayload {
-		return 'toolCallUpdates' in (payload as any);
+		return 'toolCallUpdate' in (payload as any);
 	}
 }
 

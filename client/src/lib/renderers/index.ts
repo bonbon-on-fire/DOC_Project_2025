@@ -39,6 +39,11 @@ export function registerBuiltInRenderers(): void {
 		messageType: 'tool_call'
 	};
 
+	// Register MathToolRenderer for math-specific tool calls
+	const mathToolRenderer: MessageRenderer<MessageDto> = {
+		messageType: 'math_tool'
+	};
+
 	// Register ToolResultRenderer for tool result message types
 	const toolResultRenderer: MessageRenderer<MessageDto> = {
 		messageType: 'tool_result'
@@ -47,6 +52,7 @@ export function registerBuiltInRenderers(): void {
 	registerRenderer('text', textRenderer, true);
 	registerRenderer('reasoning', reasoningRenderer, true);
 	registerRenderer('tool_call', toolCallRenderer, true);
+	registerRenderer('math_tool', mathToolRenderer, true);
 	registerRenderer('tool_result', toolResultRenderer, true);
 
 	console.info('Built-in message renderers (including tools) registered successfully');
@@ -67,6 +73,8 @@ export async function getRendererComponent(messageType: string): Promise<any> {
 			return (await import('../components/ReasoningRenderer.svelte')).default;
 		case 'tool_call':
 			return (await import('../components/ToolCallRenderer.svelte')).default;
+		case 'math_tool':
+			return (await import('../components/MathToolRenderer.svelte')).default;
 		case 'tool_result':
 			return (await import('../components/ToolResultRenderer.svelte')).default;
 		default:

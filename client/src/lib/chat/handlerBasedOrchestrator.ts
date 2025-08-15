@@ -237,9 +237,17 @@ export class HandlerBasedSSEOrchestrator {
 					break;
 				}
 				case 'messageupdate': {
+					if (raw.kind === 'tools_call_update') {
+						console.log('[Orchestrator] Tool call update event:', JSON.stringify(raw, null, 2));
+						console.log('[Orchestrator] Payload structure:', {
+							hasPayload: !!raw.payload,
+							hasToolCallUpdate: !!raw.payload?.toolCallUpdate,
+							toolCallUpdate: raw.payload?.toolCallUpdate
+						});
+					}
 					const env: StreamChunkEventEnvelope = {
 						...base,
-						kind: String(raw.kind), // 'text' | 'reasoning'
+						kind: String(raw.kind), // 'text' | 'reasoning' | 'tools_call_update'
 						messageId: String(raw.messageId),
 						sequenceId: Number(raw.sequenceId),
 						payload: raw.payload

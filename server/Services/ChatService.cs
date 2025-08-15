@@ -502,6 +502,14 @@ public class ChatService : IChatService
                         Reasoning = reasoningMessage.Reasoning,
                         Visibility = reasoningMessage.Visibility
                     },
+                    ToolsCallMessage toolsCallMessage => new ToolCallEvent
+                    {
+                        ChatId = chatId,
+                        MessageId = fullMessageId,
+                        Kind = "tools_call",
+                        SequenceNumber = sequenceNumber,
+                        ToolCalls = [.. toolsCallMessage.ToolCalls]
+                    },
                     UsageMessage usageMessage => new UsageEvent
                     {
                         ChatId = chatId,
@@ -515,6 +523,17 @@ public class ChatService : IChatService
 
                 if (evt != null)
                 {
+                    // Log tool call completion details
+                    if (evt is ToolCallEvent toolCallEvt)
+                    {
+                        _logger.LogInformation(
+                            "Sending ToolCallEvent - ChatId: {ChatId}, MessageId: {MessageId}, ToolCount: {ToolCount}, Sequence: {Sequence}",
+                            toolCallEvt.ChatId,
+                            toolCallEvt.MessageId,
+                            toolCallEvt.ToolCalls.Length,
+                            toolCallEvt.SequenceNumber);
+                    }
+                    
                     await MessageReceived(evt);
                 }
             }
@@ -606,29 +625,53 @@ public class ChatService : IChatService
             }
             else if (message is ToolsCallUpdateMessage toolsCallUpdateMessage)
             {
+                int toolCallIndex = 0;
+                var toolCallCount = toolsCallUpdateMessage.ToolCallUpdates.Count();
+                
+                _logger.LogInformation(
+                    "Processing ToolsCallUpdateMessage - ChatId: {ChatId}, BaseMessageId: {MessageId}, ToolCallCount: {ToolCallCount}, BaseSequence: {BaseSequence}",
+                    chatId,
+                    messageId,
+                    toolCallCount,
+                    messageIndex);
+                
                 foreach (var toolCallUpdate in toolsCallUpdateMessage.ToolCallUpdates)
                 {
-                    _logger.LogTrace(
-                        "ToolsCallUpdateMessage - ChatId: {ChatId}, MessageId: {MessageId}, {Type}, Tool: {Delta}",
+                    // Generate unique message ID for each tool call to avoid duplicate keys on client
+                    var toolCallMessageId = $"{messageId}_tool_{toolCallIndex}";
+                    var toolCallSequence = messageIndex + toolCallIndex;
+                    
+                    _logger.LogInformation(
+                        "ToolCall {ToolIndex}/{ToolCount} - ChatId: {ChatId}, MessageId: {MessageId}, Sequence: {Sequence}, ToolName: {ToolName}, ToolId: {ToolId}",
+                        toolCallIndex + 1,
+                        toolCallCount,
                         chatId,
-                        messageId,
-                        "tools_call_update",
-                        JsonSerializer.Serialize(toolCallUpdate));
+                        toolCallMessageId,
+                        toolCallSequence,
+                        toolCallUpdate.FunctionName ?? "unknown",
+                        toolCallUpdate.ToolCallId ?? $"idx_{toolCallUpdate.Index}");
+                    
                     if (StreamChunkReceived != null)
                     {
                         await StreamChunkReceived(
                             new ToolsCallUpdateStreamEvent
                             {
                                 ChatId = chatId,
-                                MessageId = messageId,
+                                MessageId = toolCallMessageId,
                                 Kind = "tools_call_update",
                                 Done = false,
                                 ChunkSequenceId = chunkSequenceId,
-                                SequenceNumber = messageIndex,
+                                SequenceNumber = toolCallSequence, // Unique sequence for each tool
                                 ToolCallUpdate = toolCallUpdate
                             });
                     }
+                    toolCallIndex++;
                 }
+                
+                _logger.LogInformation(
+                    "Completed ToolsCallUpdateMessage processing - ChatId: {ChatId}, Processed: {ProcessedCount} tool calls",
+                    chatId,
+                    toolCallIndex);
             }
 
             yield return message;

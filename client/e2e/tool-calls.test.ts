@@ -2,6 +2,11 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Tool Call Testing with Mock LLM', () => {
 	test.beforeEach(async ({ page }) => {
+		// Capture browser console logs
+		page.on('console', msg => {
+			console.log(`[Browser ${msg.type()}]:`, msg.text());
+		});
+		
 		await page.goto('http://localhost:5173/chat');
 		await page.waitForLoadState('networkidle');
 		await expect(page.getByPlaceholder('Start a new conversation...')).toBeVisible();
@@ -39,6 +44,15 @@ Get the weather for San Francisco
 
 			await page.waitForURL('**/chat', { timeout: 10000 });
 			await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });
+
+			// Debug: Check what messages are actually in the DOM
+			await page.waitForTimeout(2000); // Give time for messages to render
+			const components = await page.locator('[data-component]').all();
+			console.log('Found components:', components.length);
+			for (const comp of components) {
+				const componentType = await comp.getAttribute('data-component');
+				console.log('Component type:', componentType);
+			}
 
 			// Wait for tool call to appear
 			const toolCallRenderer = page.getByTestId('tool-call-renderer').first();
