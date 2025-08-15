@@ -96,6 +96,21 @@ export const chatActions = {
 			// Load chat data with all messages
 			const chat = await apiClient.getChat(chatId);
 			
+			// Log tool call messages for debugging
+			const toolCallMessages = chat.messages.filter((m: any) => m.messageType === 'tool_call' || m.toolCalls);
+			if (toolCallMessages.length > 0) {
+				console.log('[Chat Store] Loaded chat with tool call messages:', {
+					chatId,
+					toolCallMessages: toolCallMessages.map((m: any) => ({
+						id: m.id,
+						messageType: m.messageType,
+						toolCalls: m.toolCalls,
+						hasToolCalls: !!m.toolCalls,
+						toolCallsCount: m.toolCalls?.length || 0
+					}))
+				});
+			}
+			
 			// Ensure message timestamps are properly converted to Date objects
 			chat.messages = chat.messages.map((m) => ({ 
 				...m, 

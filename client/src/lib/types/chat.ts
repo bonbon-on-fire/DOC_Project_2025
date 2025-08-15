@@ -43,7 +43,7 @@ export interface ChatDto {
 	id: string;
 	userId: string;
 	title: string;
-	messages: (TextMessageDto | ReasoningMessageDto | MessageDto)[];
+	messages: (TextMessageDto | ReasoningMessageDto | ToolCallMessageDto | MessageDto)[];
 	createdAt: Date | string;
 	updatedAt: Date | string;
 }
@@ -67,6 +67,19 @@ export interface ReasoningMessageDto extends MessageDto {
 	reasoning: string;
 	visibility?: 'Plain' | 'Summary' | 'Encrypted';
 	messageType?: 'reasoning';
+}
+
+export interface ToolCallMessageDto extends MessageDto {
+	toolCalls: Array<{
+		function_name?: string;
+		function_args?: string;
+		index?: number;
+		tool_call_id?: string;
+		name?: string;
+		args?: any;
+		id?: string;
+	}>;
+	messageType?: 'tool_call';
 }
 
 // Extended message type used by renderers

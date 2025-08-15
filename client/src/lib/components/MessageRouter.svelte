@@ -65,6 +65,17 @@
 			renderError = null;
 			fallbackToMessageBubble = false;
 
+			// Log tool call messages for debugging
+			if (message.messageType === 'tool_call' || (message as any).toolCalls) {
+				console.log('[MessageRouter] Resolving renderer for tool call message:', {
+					id: message.id,
+					messageType: message.messageType,
+					toolCalls: (message as any).toolCalls,
+					hasToolCalls: !!(message as any).toolCalls,
+					toolCallsCount: (message as any).toolCalls?.length || 0
+				});
+			}
+
 			// Determine the effective message type with better debugging
 			let effectiveMessageType = message.messageType || 'text';
 			
