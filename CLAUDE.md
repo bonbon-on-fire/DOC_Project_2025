@@ -228,3 +228,10 @@ You MUST use temporary notebooks created in `scratchpad/` directory keep track o
 ##### Step 6
 
 **Validate Fix**: Validate test fixes. If tests are still broken go back to Step 1 or Step 3 based on if design was incorrect or root cause analysis was incorrect.
+
+## Important Notes
+
+**Scratchpad Use**: You MUST use scratchpad to keep your notes. If scratchpad is not used, you tend to **forget the learnings**.
+**Use Checklists**: It's best to use checklist, and store them in scratchpad for tracking of the work.
+**Per Session Directory**: Create directory in scratchpad for current session, relavent to what's being done.
+**Sequential Thinking**: You MUST use sequential thinking to organize your thoughts. It increases accuracy significantly.

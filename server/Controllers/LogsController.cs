@@ -19,6 +19,10 @@ public class LogsController(ILogger<LogsController> logger) : ControllerBase
     // When running from bin directory (compiled), we need to go up more levels
     private static readonly string ClientLogFile = GetClientLogFilePath();
     
+    // Static semaphore to ensure thread-safe writes to the client log file
+    // Acts as a mutex (1,1) to prevent concurrent writes that could corrupt the file
+    private static readonly SemaphoreSlim FileWriteLock = new SemaphoreSlim(1, 1);
+    
     private static string GetClientLogFilePath()
     {
         var currentDir = Directory.GetCurrentDirectory();
@@ -72,8 +76,19 @@ public class LogsController(ILogger<LogsController> logger) : ControllerBase
             // Serialize the log entry as JSONL (one JSON object per line)
             var jsonString = JsonSerializer.Serialize(logEntry, S_JsonSerializerOptions);
 
-            // Append to the JSONL file
-            await System.IO.File.AppendAllTextAsync(ClientLogFile, jsonString + Environment.NewLine);
+            // Use semaphore to ensure thread-safe writes to the file
+            await FileWriteLock.WaitAsync();
+            try
+            {
+                // Append to the JSONL file
+                await System.IO.File.AppendAllTextAsync(
+                    ClientLogFile,
+                    jsonString + Environment.NewLine);
+            }
+            finally
+            {
+                FileWriteLock.Release();
+            }
 
             // Also log to server's structured logging system for correlation
             _logger.LogDebug("Client log entry written to file: {ClientLog}", jsonString);

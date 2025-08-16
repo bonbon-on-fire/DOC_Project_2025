@@ -31,11 +31,18 @@
       "Bash(move:*)",
       "mcp__memroy_db__list_tables",
       "Bash(dir:*)",
-      "mcp__memroy_db__read_query"
+      "mcp__memroy_db__read_query",
+      "Bash(tasklist)",
+      "mcp__sequential-thinking-tools__sequentialthinking",
+      "Bash(cmd /c:*)"
     ],
     "deny": [],
     "ask": [],
-    "defaultMode": "acceptEdits"
+    "defaultMode": "acceptEdits",
+    "additionalDirectories": [
+      "B:\\b\\sources\\DOC_Project_2025\\submodules\\LmDotnetTools\\src",
+      "B:\\b\\sources\\DOC_Project_2025"
+    ]
   },
   "enabledMcpjsonServers": [
     "sequential-thinking-tools",

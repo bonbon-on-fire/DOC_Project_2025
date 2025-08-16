@@ -69,17 +69,35 @@ export interface ReasoningMessageDto extends MessageDto {
 	messageType?: 'reasoning';
 }
 
+export interface ToolCall {
+	function_name?: string;
+	function_args?: string;
+	index?: number;
+	tool_call_id?: string;
+	name?: string;
+	args?: any;
+	id?: string;
+}
+
+export interface ToolCallResult {
+	toolCallId: string;
+	result: string;
+}
+
 export interface ToolCallMessageDto extends MessageDto {
-	toolCalls: Array<{
-		function_name?: string;
-		function_args?: string;
-		index?: number;
-		tool_call_id?: string;
-		name?: string;
-		args?: any;
-		id?: string;
-	}>;
+	toolCalls: ToolCall[];
 	messageType?: 'tool_call';
+}
+
+export interface ToolResultMessageDto extends MessageDto {
+	toolResults: ToolCallResult[];
+	messageType?: 'tool_result';
+}
+
+export interface ToolsCallAggregateMessageDto extends MessageDto {
+	toolCalls: ToolCall[];
+	toolResults?: ToolCallResult[];
+	messageType?: 'tools_aggregate';
 }
 
 // Extended message type used by renderers

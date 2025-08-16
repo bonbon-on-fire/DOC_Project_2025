@@ -29,6 +29,13 @@
 
 	function getReasoningText(msg: any): string {
 		if (!msg) return '';
+		
+		// Check visibility - don't display encrypted reasoning at all
+		const visibility = (msg as any).visibility || (msg as any).Visibility;
+		if (visibility === 'encrypted' || visibility === 'Encrypted' || visibility === 2) {
+			return '';
+		}
+		
 		// Support new DTOs (camelCase)
 		if (typeof (msg as any).reasoning === 'string' && (msg as any).reasoning.trim())
 			return (msg as any).reasoning;
@@ -36,6 +43,12 @@
 		if (typeof (msg as any).Reasoning === 'string' && (msg as any).Reasoning.trim())
 			return (msg as any).Reasoning;
 		return '';
+	}
+	
+	// Check if the reasoning should be hidden completely
+	function isReasoningHidden(msg: any): boolean {
+		const visibility = (msg as any).visibility || (msg as any).Visibility;
+		return visibility === 'encrypted' || visibility === 'Encrypted' || visibility === 2;
 	}
 
 	// Component implements MessageRenderer interface
@@ -62,6 +75,12 @@ $: isStreamingForThis = Boolean($streamingSnapshots?.[message.id]?.isStreaming);
 		const dtoText = getReasoningText(message);
 		if (dtoText && dtoText.trim()) return dtoText;
 		const snap = $streamingSnapshots?.[message.id];
+		
+		// Check visibility in snapshot for streaming messages
+		if (snap?.visibility === 'Encrypted') {
+			return '';
+		}
+		
 		return (snap?.reasoningDelta || '');
 	})();
 	$: collapsedPreview = reasoningText.length > 60 
@@ -80,6 +99,7 @@ $: isStreamingForThis = Boolean($streamingSnapshots?.[message.id]?.isStreaming);
 </script>
 
 <!-- Reasoning message using reusable collapsible renderer -->
+{#if !isReasoningHidden(message)}
 <div data-component="reasoning-renderer" data-testid="reasoning-renderer">
 <CollapsibleMessageRenderer
 	{message}
@@ -137,3 +157,4 @@ $: isStreamingForThis = Boolean($streamingSnapshots?.[message.id]?.isStreaming);
 	</div>
 </CollapsibleMessageRenderer>
 </div>
+{/if}

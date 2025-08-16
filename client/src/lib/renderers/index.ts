@@ -48,12 +48,18 @@ export function registerBuiltInRenderers(): void {
 	const toolResultRenderer: MessageRenderer<MessageDto> = {
 		messageType: 'tool_result'
 	};
+	
+	// Register ToolsCallAggregateRenderer for aggregate tool messages
+	const toolsAggregateRenderer: MessageRenderer<MessageDto> = {
+		messageType: 'tools_aggregate'
+	};
 
 	registerRenderer('text', textRenderer, true);
 	registerRenderer('reasoning', reasoningRenderer, true);
 	registerRenderer('tool_call', toolCallRenderer, true);
 	registerRenderer('math_tool', mathToolRenderer, true);
 	registerRenderer('tool_result', toolResultRenderer, true);
+	registerRenderer('tools_aggregate', toolsAggregateRenderer, true);
 
 	console.info('Built-in message renderers (including tools) registered successfully');
 }
@@ -77,6 +83,8 @@ export async function getRendererComponent(messageType: string): Promise<any> {
 			return (await import('../components/MathToolRenderer.svelte')).default;
 		case 'tool_result':
 			return (await import('../components/ToolResultRenderer.svelte')).default;
+		case 'tools_aggregate':
+			return (await import('../components/ToolsCallAggregateRenderer.svelte')).default;
 		default:
 			console.warn(`No component found for message type '${messageType}', using fallback`);
 			return null;

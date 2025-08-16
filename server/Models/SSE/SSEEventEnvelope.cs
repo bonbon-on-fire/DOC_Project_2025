@@ -96,6 +96,18 @@ public class ToolCallUpdateStreamChunkPayload : StreamChunkPayload
 }
 
 /// <summary>
+/// Payload for tool calls aggregate stream event containing both calls and results
+/// </summary>
+public class ToolsCallAggregatePayload : StreamChunkPayload
+{
+    [JsonPropertyName("toolCalls")]
+    public ToolCall[]? ToolCalls { get; set; }
+    
+    [JsonPropertyName("toolResults")]
+    public ToolCallResult[]? ToolResults { get; set; }
+}
+
+/// <summary>
 /// Envelope for complete message events
 /// </summary>
 public class MessageCompleteEventEnvelope : SSEEventEnvelope
@@ -145,6 +157,18 @@ public class ToolCallCompletePayload : MessageCompletePayload
 {
     [JsonPropertyName("toolCalls")]
     public required ToolCall[] ToolCalls { get; set; }
+}
+
+/// <summary>
+/// Payload for completed tool call aggregate messages
+/// </summary>
+public class ToolsCallAggregateCompletePayload : MessageCompletePayload
+{
+    [JsonPropertyName("toolCalls")]
+    public required ToolCall[] ToolCalls { get; set; }
+    
+    [JsonPropertyName("toolResults")]
+    public ToolCallResult[]? ToolResults { get; set; }
 }
 
 /// <summary>

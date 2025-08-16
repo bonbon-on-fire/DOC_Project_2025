@@ -32,6 +32,12 @@ public static class SSEEventExtensions
                 Delta = "",
                 ToolCallUpdate = toolCallUpdateEvent.ToolCallUpdate
             },
+            ToolsCallAggregateStreamEvent aggregateEvent => new ToolsCallAggregatePayload
+            {
+                Delta = "", // Required property for base class
+                ToolCalls = aggregateEvent.ToolCalls,
+                ToolResults = aggregateEvent.ToolResults
+            },
             _ => throw new InvalidOperationException($"Unsupported stream event type: {streamEvent.GetType().Name}")
         };
 
@@ -66,6 +72,11 @@ public static class SSEEventExtensions
             ToolCallEvent toolCallEvent => new ToolCallCompletePayload
             {
                 ToolCalls = toolCallEvent.ToolCalls
+            },
+            ToolsCallAggregateEvent toolsAggregateEvent => new ToolsCallAggregateCompletePayload
+            {
+                ToolCalls = toolsAggregateEvent.ToolCalls,
+                ToolResults = toolsAggregateEvent.ToolResults
             },
             UsageEvent usageEvent => new UsageCompletePayload
             {

@@ -7,28 +7,88 @@ using AIChat.Server.Storage;
 using System.Text.Json;
 using AIChat.Server.Models;
 using AchieveAi.LmDotnetTools.LmCore.Middleware;
+using AIChat.Server.Functions;
 
 namespace AIChat.Server.Services;
 
-public class ChatService : IChatService
+public class ChatService : IChatService, IToolResultCallback
 {
     private readonly IChatStorage _storage;
     private readonly IStreamingAgent _streamingAgent;
     private readonly ILogger<ChatService> _logger;
     private readonly AiOptions _aiOptions;
+    private readonly FunctionCallMiddleware? _functionCallMiddleware;
 
     public ChatService(
         IChatStorage storage,
         IStreamingAgent streamingAgent,
         ILogger<ChatService> logger,
-        IOptions<AiOptions> aiOptions)
+        IOptions<AiOptions> aiOptions,
+        IServiceProvider serviceProvider)
     {
         _storage = storage;
         _streamingAgent = streamingAgent;
         _logger = logger;
         _aiOptions = aiOptions.Value;
+        
+        // Initialize function registry and middleware
+        _functionCallMiddleware = InitializeFunctionCallMiddleware(serviceProvider);
+    }
+    
+    private FunctionCallMiddleware? InitializeFunctionCallMiddleware(IServiceProvider serviceProvider)
+    {
+        try
+        {
+            _logger.LogInformation("Starting FunctionCallMiddleware initialization");
+            
+            // Create function registry
+            var registry = new FunctionRegistry();
+            
+            // Add weather function provider
+            var weatherLogger = serviceProvider.GetRequiredService<ILogger<WeatherFunction>>();
+            var weatherProvider = new WeatherFunction(weatherLogger);
+            registry.AddProvider(weatherProvider);
+            _logger.LogInformation("Added WeatherFunction provider to registry");
+            
+            // Build function contracts and handlers
+            var (contracts, handlers) = registry.Build();
+            
+            if (!contracts.Any())
+            {
+                _logger.LogWarning("No functions registered for FunctionCallMiddleware");
+                return null;
+            }
+            
+            _logger.LogInformation("Registered {Count} functions for tool calling", contracts.Count());
+            foreach (var contract in contracts)
+            {
+                _logger.LogInformation("Registered function: {Name} - {Description}", contract.Name, contract.Description);
+            }
+            
+            // Create middleware with callback
+            var middlewareLogger = serviceProvider.GetRequiredService<ILogger<FunctionCallMiddleware>>();
+            var middleware = new FunctionCallMiddleware(
+                contracts,
+                handlers,
+                name: "FunctionCall",
+                logger: middlewareLogger,
+                resultCallback: this); // Use this ChatService as the IToolResultCallback
+            
+            _logger.LogInformation("FunctionCallMiddleware created successfully");    
+            return middleware;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to initialize FunctionCallMiddleware");
+            return null;
+        }
     }
 
+    // Fields for tracking tool execution state
+    private string? _currentChatId;
+    private string? _currentMessageId;
+    private int _nextSequence;
+    
     // Events for real-time notifications
     public event Func<MessageCreatedEvent, Task>? MessageCreated;
     public event Func<StreamChunkEvent, Task>? StreamChunkReceived;
@@ -110,7 +170,7 @@ public class ChatService : IChatService
             // Build DTO with ordered messages
             var (Success, Error, Messages) = await _storage.ListChatMessagesOrderedAsync(chat.Id);
             var messages = Success
-                ? Messages.Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson)!).ToList()
+                ? Messages.Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!).ToList()
                 : [ userDto ];
 
             return new ChatResult
@@ -147,7 +207,7 @@ public class ChatService : IChatService
             _logger.LogInformation("Loading messages for chat {ChatId}: Found {Count} messages", chatId, Messages?.Count ?? 0);
             
             var messages = Success
-                ? Messages.Select(m => {
+                ? Messages!.Select(m => {
                     var dto = JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!;
                     
                     // Log tool call messages for debugging
@@ -194,7 +254,7 @@ public class ChatService : IChatService
             {
                 var (msgsSuccess, msgsError, msgsMessages) = await _storage.ListChatMessagesOrderedAsync(c.Id);
                 var messages = msgsSuccess
-                    ? [.. msgsMessages.Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson)!)]
+                    ? [.. msgsMessages.Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!)]
                     : new List<MessageDto>();
 
                 chatDtos.Add(new ChatDto
@@ -362,7 +422,7 @@ public class ChatService : IChatService
                 Kind = "text",
                 TimestampUtc = sysDto.Timestamp,
                 SequenceNumber = sysDto.SequenceNumber,
-                MessageJson = JsonSerializer.Serialize<MessageDto>(sysDto)
+                MessageJson = JsonSerializer.Serialize<MessageDto>(sysDto, MessageSerializationOptions.Default)
             });
         }
 
@@ -405,7 +465,7 @@ public class ChatService : IChatService
 
         var convo = await _storage.ListChatMessagesOrderedAsync(chatId);
         var history = convo.Messages
-            .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson)!)
+            .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!)
             .Where(d => d is TextMessageDto td && !string.IsNullOrWhiteSpace(td.Text))
             .ToList();
 
@@ -418,7 +478,7 @@ public class ChatService : IChatService
     {
         var (_, _, messages) = await _storage.ListChatMessagesOrderedAsync(chatId, cancellationToken);
         var history = messages
-            .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson)!)
+            .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!)
             .Where(d => d is TextMessageDto td && !string.IsNullOrWhiteSpace(td.Text))
             .ToList();
 
@@ -430,6 +490,10 @@ public class ChatService : IChatService
         List<MessageDto> history,
         CancellationToken cancellationToken)
     {
+        // Set context for tool result callbacks
+        _currentChatId = chatId;
+        _nextSequence = history.Count > 0 ? history.Max(m => m.SequenceNumber) + 1 : 0;
+        
         _logger.LogInformation("[DEBUG] StreamChatCompletionAsync - ChatId: {ChatId}, History count: {Count}", chatId, history.Count);
         foreach (var msg in history)
         {
@@ -450,7 +514,8 @@ public class ChatService : IChatService
         _logger.LogInformation("Making API call to LLM for chat {ChatId}", chatId);
         var options = new GenerateReplyOptions { ModelId = GetModelId() };
 
-        var streamingResponse = await _streamingAgent
+        // Build middleware chain
+        var agent = _streamingAgent
             .WithMiddleware(new JsonFragmentUpdateMiddleware())
             .WithMiddleware(
                 (context, agent, cancellationToken) =>
@@ -469,7 +534,20 @@ public class ChatService : IChatService
 
                     return ProcessStream(stream, chatId, userMsgSequence, cancellationToken);
                 }
-            )
+            );
+            
+        // Add FunctionCallMiddleware if available
+        if (_functionCallMiddleware != null)
+        {
+            _logger.LogInformation("Adding FunctionCallMiddleware to processing chain");
+            agent = agent.WithMiddleware(_functionCallMiddleware);
+        }
+        else
+        {
+            _logger.LogWarning("FunctionCallMiddleware is null, tool calls will not be processed");
+        }
+        
+        var streamingResponse = await agent
             .WithMiddleware(new MessageUpdateJoinerMiddleware())
             .GenerateReplyStreamingAsync(
                 lmMessages,
@@ -487,14 +565,6 @@ public class ChatService : IChatService
                 message.GetType().Name,
                 chatId);
             
-            // Skip streaming update messages - only persist complete messages
-            if (message is ToolsCallUpdateMessage)
-            {
-                _logger.LogTrace(
-                    "Skipping ToolsCallUpdateMessage persistence - these are streaming chunks, not complete messages");
-                continue;
-            }
-            
             fullMessageIndex++;
 
             lastFullMessageType = message.GetType();
@@ -503,6 +573,7 @@ public class ChatService : IChatService
                 ? $"gen-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid():N}".Substring(0, 32)
                 : message.GenerationId;
             var fullMessageId = generationId + $"-{fullMessageIndex:D3}";
+            _currentMessageId = fullMessageId; // Track for tool result callbacks
             
             _logger.LogInformation(
                 "Persisting message from middleware - Type: {MessageType}, MessageId: {MessageId}, ChatId: {ChatId}",
@@ -556,10 +627,19 @@ public class ChatService : IChatService
                         SequenceNumber = sequenceNumber,
                         Usage = usageMessage.Usage
                     },
+                    ToolsCallAggregateMessage toolsAggregateMessage => new ToolsCallAggregateEvent
+                    {
+                        ChatId = chatId,
+                        MessageId = fullMessageId,
+                        Kind = "tools_aggregate",
+                        SequenceNumber = sequenceNumber,
+                        ToolCalls = [.. toolsAggregateMessage.ToolsCallMessage.ToolCalls],
+                        ToolResults = toolsAggregateMessage.ToolsCallResult?.ToolCallResults?.ToArray()
+                    },
                     _ => null
                 };
 
-                if (evt != null)
+                if (evt != null) 
                 {
                     // Log tool call completion details
                     if (evt is ToolCallEvent toolCallEvt)
@@ -672,96 +752,33 @@ public class ChatService : IChatService
                     }
                 }
             }
-            else if (message is ToolsCallMessage toolsCallMessage)
-            {
-                // Handle complete tool call messages from the message joiner middleware
-                _logger.LogTrace(
-                    "Processing complete ToolsCallMessage - ChatId: {ChatId}, MessageId: {MessageId}, ToolCallCount: {ToolCallCount}, GenerationId: {GenerationId}",
-                    chatId,
-                    messageId,
-                    toolsCallMessage.ToolCalls.Count,
-                    toolsCallMessage.GenerationId ?? "null");
-                
-                // Log each tool call in detail
-                foreach (var toolCall in toolsCallMessage.ToolCalls)
-                {
-                    _logger.LogTrace(
-                        "Tool call detail - FunctionName: {FunctionName}, ArgsLength: {ArgsLength}, ToolCallId: {ToolCallId}, Index: {Index}",
-                        toolCall.FunctionName,
-                        toolCall.FunctionArgs?.Length ?? 0,
-                        toolCall.ToolCallId ?? "null",
-                        toolCall.Index ?? -1);
-                }
-                
-                // Ensure we have a valid generation ID for tool call message
-                var toolGenId = string.IsNullOrEmpty(toolsCallMessage.GenerationId) 
-                    ? $"gen-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid():N}".Substring(0, 32)
-                    : toolsCallMessage.GenerationId;
-                var fullMessageId = toolGenId + $"-{messageIndex:D3}";
-                
-                _logger.LogInformation(
-                    "Persisting complete ToolsCallMessage - ChatId: {ChatId}, FullMessageId: {FullMessageId}, GenerationId: {GenerationId}, ToolCount: {ToolCount}",
-                    chatId,
-                    fullMessageId,
-                    toolGenId,
-                    toolsCallMessage.ToolCalls.Count);
-                
-                // Persist the complete tool call message with all tools as a single message
-                var sequenceNumber = await PersistFullMessage(chatId, toolsCallMessage, fullMessageId);
-                
-                _logger.LogInformation(
-                    "ToolsCallMessage persisted successfully - ChatId: {ChatId}, FullMessageId: {FullMessageId}, SequenceNumber: {SequenceNumber}",
-                    chatId,
-                    fullMessageId,
-                    sequenceNumber);
-                
-                // Also broadcast it as a complete event
-                if (MessageReceived != null)
-                {
-                    _logger.LogTrace(
-                        "Broadcasting ToolCallEvent - ChatId: {ChatId}, MessageId: {FullMessageId}, ToolCount: {ToolCount}",
-                        chatId,
-                        fullMessageId,
-                        toolsCallMessage.ToolCalls.Count);
-                        
-                    await MessageReceived(
-                        new ToolCallEvent
-                        {
-                            ChatId = chatId,
-                            MessageId = fullMessageId,
-                            Kind = "tool_call",
-                            SequenceNumber = sequenceNumber,
-                            ToolCalls = toolsCallMessage.ToolCalls.ToArray()
-                        });
-                }
-            }
             else if (message is ToolsCallUpdateMessage toolsCallUpdateMessage)
             {
                 // These are streaming chunks - just pass them through for real-time display
                 // The message joiner middleware will accumulate these into a complete ToolsCallMessage
                 int toolCallIndex = 0;
                 var toolCallCount = toolsCallUpdateMessage.ToolCallUpdates.Count();
-                
+
                 _logger.LogTrace(
                     "Processing ToolsCallUpdateMessage (streaming chunk) - ChatId: {ChatId}, MessageId: {MessageId}, ToolCallCount: {ToolCallCount}, GenerationId: {GenerationId}",
                     chatId,
                     messageId,
                     toolCallCount,
                     generationId);
-                
+
                 foreach (var toolCallUpdate in toolsCallUpdateMessage.ToolCallUpdates)
                 {
                     // Generate unique message ID for each tool call to avoid duplicate keys on client
                     var toolCallMessageId = $"{messageId}_tool_{toolCallIndex}";
                     var toolCallSequence = messageIndex + toolCallIndex;
-                    
+
                     _logger.LogTrace(
                         "Streaming tool call update - Index: {Index}, FunctionName: {FunctionName}, ArgsLength: {ArgsLength}, ToolCallId: {ToolCallId}",
                         toolCallUpdate.Index ?? toolCallIndex,
                         toolCallUpdate.FunctionName ?? "null",
                         toolCallUpdate.FunctionArgs?.Length ?? 0,
                         toolCallUpdate.ToolCallId ?? "null");
-                    
+
                     _logger.LogInformation(
                         "ToolCall {ToolIndex}/{ToolCount} - ChatId: {ChatId}, MessageId: {MessageId}, Sequence: {Sequence}, ToolName: {ToolName}, ToolId: {ToolId}",
                         toolCallIndex + 1,
@@ -771,7 +788,7 @@ public class ChatService : IChatService
                         toolCallSequence,
                         toolCallUpdate.FunctionName ?? "unknown",
                         toolCallUpdate.ToolCallId ?? $"idx_{toolCallUpdate.Index}");
-                    
+
                     if (StreamChunkReceived != null)
                     {
                         await StreamChunkReceived(
@@ -788,7 +805,7 @@ public class ChatService : IChatService
                     }
                     toolCallIndex++;
                 }
-                
+
                 _logger.LogTrace(
                     "Streamed {Count} tool call updates - ChatId: {ChatId}, GenerationId: {GenerationId}",
                     toolCallIndex,
@@ -885,6 +902,26 @@ public class ChatService : IChatService
                         Timestamp = timestamp,
                         SequenceNumber = nextSequence,
                         ToolCalls = [.. toolsCall.ToolCalls]
+                    }, MessageSerializationOptions.Default)
+            },
+            ToolsCallAggregateMessage aggregate => new MessageRecord
+            {
+                Id = fullMessageId,
+                ChatId = chatId,
+                Role = aggregate.Role.ToString(),
+                Kind = "tools_aggregate",
+                TimestampUtc = timestamp,
+                SequenceNumber = nextSequence,
+                MessageJson = JsonSerializer.Serialize<MessageDto>(
+                    new ToolsCallAggregateMessageDto
+                    {
+                        Id = fullMessageId,
+                        ChatId = chatId,
+                        Role = aggregate.Role.ToString(),
+                        Timestamp = timestamp,
+                        SequenceNumber = nextSequence,
+                        ToolCalls = aggregate.ToolsCallMessage.ToolCalls.ToArray(),
+                        ToolResults = aggregate.ToolsCallResult?.ToolCallResults?.ToArray()
                     }, MessageSerializationOptions.Default)
             },
             _ => null
@@ -1060,7 +1097,7 @@ public class ChatService : IChatService
             var (_, _, listMessages) = await _storage.ListChatMessagesOrderedAsync(request.ChatId, cancellationToken);
             var lastAssistant = listMessages.FirstOrDefault(m =>
             {
-                var dto = JsonSerializer.Deserialize<MessageDto>(m.MessageJson)!;
+                var dto = JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!;
                 return dto.Role == "assistant" && dto.SequenceNumber == assistantSeqNumber;
             });
             if (lastAssistant == null)
@@ -1084,7 +1121,7 @@ public class ChatService : IChatService
         {
             var (_, _, listMessages) = await _storage.ListChatMessagesOrderedAsync(chatId);
             var history = listMessages
-                .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson)!)
+                .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!)
                 .Where(d => d is TextMessageDto td && !string.IsNullOrWhiteSpace(td.Text))
                 .ToList();
             var lmMessages = history.Select(ConvertToLmMessage).ToList();
@@ -1146,4 +1183,42 @@ public class ChatService : IChatService
             : firstMessage;
         return title;
     }
+    
+    #region IToolResultCallback Implementation
+    
+    public async Task OnToolResultAvailableAsync(string toolCallId, ToolCallResult result, CancellationToken cancellationToken = default)
+    {
+        // Stream result to client immediately if we're in a streaming context
+        if (StreamChunkReceived != null && !string.IsNullOrEmpty(_currentChatId) && !string.IsNullOrEmpty(_currentMessageId))
+        {
+            await StreamChunkReceived(new ToolResultStreamEvent
+            {
+                ChatId = _currentChatId,
+                MessageId = $"{_currentMessageId}_result_{toolCallId}",
+                Kind = "tool_result",
+                Done = true,
+                SequenceNumber = _nextSequence++,
+                ChunkSequenceId = 0,
+                ToolCallId = toolCallId,
+                Result = result.Result,
+                IsError = result.Result.StartsWith("Error")
+            });
+        }
+    }
+    
+    public async Task OnToolCallStartedAsync(string toolCallId, string functionName, string functionArgs, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Tool call started - ToolCallId: {ToolCallId}, Function: {FunctionName}", 
+            toolCallId, functionName);
+        await Task.CompletedTask;
+    }
+    
+    public async Task OnToolCallErrorAsync(string toolCallId, string functionName, string error, CancellationToken cancellationToken = default)
+    {
+        _logger.LogError("Tool call error - ToolCallId: {ToolCallId}, Function: {FunctionName}, Error: {Error}", 
+            toolCallId, functionName, error);
+        await Task.CompletedTask;
+    }
+    
+    #endregion
 }

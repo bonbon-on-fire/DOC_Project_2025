@@ -33,7 +33,8 @@ This document explains the LmDotnetTools submodule found at `submodules/LmDotnet
   - `Merge(other)`: deep-merges into a new options instance; `other` values win, `ExtraProperties` dictionaries are merged recursively.
 
 ### Tooling Contracts
-- `FunctionContract`, `FunctionParameterContract`, `FunctionAttribute` (files: `LmCore/Core/*`): declarative function metadata for “tool use”. `FunctionContract.GetJsonSchema()` builds a JSON schema from the parameters list. Used by middleware and providers to advertise tools to a model and to validate arguments.
+- `FunctionContract`, `FunctionParameterContract`, `FunctionAttribute` (files: `LmCore/Core/*`): declarative function metadata for "tool use". `FunctionContract.GetJsonSchema()` builds a JSON schema from the parameters list. Used by middleware and providers to advertise tools to a model and to validate arguments.
+- `FunctionDescriptor` (file: `LmCore/Middleware/FunctionDescriptor.cs`): Record that pairs a `FunctionContract` with its runtime handler (`Func<string, Task<string>>`), plus provider metadata for conflict resolution.
 
 ### Messages (selected)
 - `TextMessage`, `TextUpdateMessage`: full or incremental text.
@@ -43,6 +44,29 @@ This document explains the LmDotnetTools submodule found at `submodules/LmDotnet
 - `ToolsCallResultMessage`: tool results to feed back to the model
 - `UsageMessage`: unified usage accounting
 - Builders: `TextMessageBuilder`, `ToolsCallMessageBuilder`, etc., to aggregate updates into final messages.
+
+### Function Registry and Provider System (LmCore/Middleware)
+- `FunctionRegistry`
+  - Purpose: Builder for combining functions from multiple sources with declarative conflict resolution when multiple providers offer the same function name.
+  - Construction: `new FunctionRegistry()` then chain configuration methods.
+  - Key methods:
+    - `AddProvider(IFunctionProvider)`: Add functions from a provider (MCP, Natural, etc.) ordered by priority.
+    - `AddFunction(contract, handler, providerName?)`: Add a single function explicitly (takes precedence).
+    - `WithConflictResolution(ConflictResolution)`: Set strategy for handling naming conflicts.
+    - `WithConflictHandler(Func<string, IEnumerable<FunctionDescriptor>, FunctionDescriptor>)`: Custom conflict resolution logic.
+    - `Build()`: Returns `(IEnumerable<FunctionContract>, IDictionary<string, Func<string, Task<string>>>)` for use with `FunctionCallMiddleware`.
+    - `BuildMiddleware(name?)`: Directly creates configured `FunctionCallMiddleware`.
+  - Conflict resolution strategies (`ConflictResolution` enum):
+    - `Throw`: Fail fast on conflicts (default).
+    - `TakeFirst`/`TakeLast`: First/last registered wins.
+    - `PreferMcp`/`PreferNatural`: Prefer specific provider types.
+    - `RequireExplicit`: Force use of custom handler.
+
+- `IFunctionProvider`, `IFunctionProviderRegistry`, `IFunctionCallMiddlewareFactory`
+  - `IFunctionProvider`: Interface for components that provide functions (name, priority, `GetFunctions()`).
+  - `IFunctionProviderRegistry`: Service for discovering and managing providers via DI.
+  - `IFunctionCallMiddlewareFactory`: Factory that uses registry to create middleware with all registered providers.
+  - `FunctionCallMiddlewareFactory`: Default implementation that builds `FunctionRegistry` from all registered providers.
 
 ### Core Middleware (LmCore/Middleware)
 All implement `IStreamingMiddleware` unless noted; each can be used with both sync and streaming entry points.
@@ -213,7 +237,30 @@ All implement `IStreamingMiddleware` unless noted; each can be used with both sy
 
 ## Putting It Together: Common Recipes
 
-### 1) Simple OpenAI agent with usage enrichment and console printing
+### 1) Using FunctionRegistry to combine multiple function sources
+```csharp
+// Create registry and combine functions from different sources
+var registry = new FunctionRegistry()
+    .AddProvider(mcpProvider)           // Add MCP provider functions
+    .AddProvider(naturalToolProvider)   // Add natural tool functions
+    .AddFunction(customContract, customHandler, "Custom") // Add explicit function
+    .WithConflictResolution(ConflictResolution.PreferMcp); // MCP wins on conflicts
+
+// Build middleware with combined functions
+var middleware = registry.BuildMiddleware("CombinedFunctions");
+
+// Or use with DI and factory pattern
+var factory = services.GetRequiredService<IFunctionCallMiddlewareFactory>();
+var middleware = factory.Create("MyFunctions", registry => 
+{
+    registry.WithConflictResolution(ConflictResolution.TakeLast)
+           .AddFunction(overrideContract, overrideHandler);
+});
+
+var agent = baseAgent.WithMiddleware(middleware);
+```
+
+### 2) Simple OpenAI agent with usage enrichment and console printing
 ```csharp
 var http = services.CreateCachingOpenAIClient(apiKey, baseUrl);
 var client = new OpenClient(http, loggerFactory.CreateLogger<OpenClient>());
@@ -233,7 +280,7 @@ await foreach (var msg in await streaming.GenerateReplyStreamingAsync(messages, 
 }
 ```
 
-### 2) Natural tool use: parse <tool_call> + execute functions
+### 3) Natural tool use: parse <tool_call> + execute functions
 ```csharp
 // Define contracts and function map
 IEnumerable<FunctionContract> functions = new[] {
@@ -255,7 +302,7 @@ var composed = agent
 var replies = await composed.GenerateReplyAsync(messages, new GenerateReplyOptions { ModelId = "gpt-4o" });
 ```
 
-### 3) MCP-backed tools
+### 4) MCP-backed tools
 ```csharp
 // Given one or more IMcpClient implementations
 var mcpClients = new Dictionary<string, IMcpClient> {
@@ -272,7 +319,7 @@ var composed = agent
 var stream = await composed.GenerateReplyStreamingAsync(messages, options);
 ```
 
-### 4) Options override and model fallback
+### 5) Options override and model fallback
 ```csharp
 var strictJson = new OptionsOverridingMiddleware(new GenerateReplyOptions {
   ResponseFormat = ResponseFormat.CreateWithSchema("my_schema", mySchema, strictValidation: true)
@@ -304,6 +351,7 @@ var composed = primaryAgent
 ## Quick Index (Middleware)
 
 - Core
+  - FunctionRegistry: Builder for combining functions from multiple sources with conflict resolution.
   - FunctionCallMiddleware: execute tool calls + accumulate usage.
   - NaturalToolUseParserMiddleware: parse <tool_call> text blocks into ToolsCallMessage.
   - NaturalToolUseMiddleware: parser + executor combo.

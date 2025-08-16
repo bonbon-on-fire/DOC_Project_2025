@@ -199,7 +199,7 @@ public class ChatController : ControllerBase
     private async Task SendSseEvent(string eventType, object data, string? id = null)
     {
         // Always stream to the current HTTP response (client fetch())
-        var json = System.Text.Json.JsonSerializer.Serialize(data);
+        var json = System.Text.Json.JsonSerializer.Serialize(data, Services.MessageSerializationOptions.Default);
         if (!string.IsNullOrEmpty(id))
         {
             await Response.WriteAsync($"id: {id}\n");

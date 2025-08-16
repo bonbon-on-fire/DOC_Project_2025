@@ -271,6 +271,9 @@ export class SlimChatSyncManager implements HandlerEventListener {
 		// Include type-specific data from snapshot
 		if (dtoMessageType === 'tool_call' && snapshot.toolCalls) {
 			(messageDto as any).toolCalls = snapshot.toolCalls;
+		} else if (dtoMessageType === 'tools_aggregate' && (snapshot.toolCalls || snapshot.toolResults)) {
+			(messageDto as any).toolCalls = snapshot.toolCalls || [];
+			(messageDto as any).toolResults = snapshot.toolResults || [];
 		} else if (dtoMessageType === 'text' && snapshot.textDelta) {
 			(messageDto as any).text = snapshot.textDelta;
 		} else if (dtoMessageType === 'reasoning' && snapshot.reasoningDelta) {
@@ -294,6 +297,21 @@ export class SlimChatSyncManager implements HandlerEventListener {
 				const updatedDto = {
 					...existingMessage,
 					toolCalls: snapshot.toolCalls
+				};
+				this.updateMessageInChat(messageId, updatedDto);
+			}
+		}
+		// For tools aggregate messages, update both tool calls and results
+		else if (snapshot.messageType === 'tools_aggregate' && (snapshot.toolCalls || snapshot.toolResults)) {
+			const currentChat = get(this.currentChatStore);
+			const existingMessage = currentChat?.messages.find(m => m.id === messageId);
+			
+			if (existingMessage && existingMessage.messageType === 'tools_aggregate') {
+				// Update the existing message with current tool calls and results
+				const updatedDto = {
+					...existingMessage,
+					toolCalls: snapshot.toolCalls || [],
+					toolResults: snapshot.toolResults || []
 				};
 				this.updateMessageInChat(messageId, updatedDto);
 			}

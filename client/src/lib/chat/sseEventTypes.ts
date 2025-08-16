@@ -94,13 +94,23 @@ export interface ToolCallUpdateStreamChunkPayload extends StreamChunkPayload {
 }
 
 /**
+ * Payload for tool result streaming chunks
+ * Matches: AIChat.Server.Services.ToolResultStreamEvent
+ */
+export interface ToolResultStreamChunkPayload extends StreamChunkPayload {
+	toolCallId: string;
+	result: string;
+	isError?: boolean;
+}
+
+/**
  * Envelope for streaming chunk events (delta updates)
  * Matches: AIChat.Server.Models.SSE.StreamChunkEventEnvelope
  */
 export interface StreamChunkEventEnvelope extends SSEEventEnvelope {
 	messageId: string;
 	sequenceId: number;
-	payload: TextStreamChunkPayload | ReasoningStreamChunkPayload | ToolCallUpdateStreamChunkPayload;
+	payload: TextStreamChunkPayload | ReasoningStreamChunkPayload | ToolCallUpdateStreamChunkPayload | ToolResultStreamChunkPayload;
 }
 
 // ============================================================================
@@ -230,7 +240,9 @@ export namespace SSEEventGuards {
 				'done' in payload || 'visibility' in payload || Object.keys(payload).length === 1 // delta-only
 			)) ||
 			// Tool call update chunk
-			'toolCallUpdate' in payload
+			'toolCallUpdate' in payload ||
+			// Tool result chunk
+			'toolCallId' in payload
 		);
 	}
 
@@ -268,6 +280,10 @@ export namespace StreamChunkPayloadGuards {
 
 	export function isToolCallUpdateStreamChunk(payload: StreamChunkPayload): payload is ToolCallUpdateStreamChunkPayload {
 		return 'toolCallUpdate' in (payload as any);
+	}
+	
+	export function isToolResultStreamChunk(payload: StreamChunkPayload): payload is ToolResultStreamChunkPayload {
+		return 'toolCallId' in (payload as any) && 'result' in (payload as any);
 	}
 }
 

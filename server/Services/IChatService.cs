@@ -176,6 +176,15 @@ public record ToolsCallUpdateStreamEvent : StreamChunkEvent
     public required ToolCallUpdate ToolCallUpdate { get; init; }
 }
 
+public record ToolsCallAggregateStreamEvent : StreamChunkEvent
+{
+    [JsonPropertyName("toolCalls")]
+    public ToolCall[]? ToolCalls { get; init; }
+    
+    [JsonPropertyName("toolResults")]
+    public ToolCallResult[]? ToolResults { get; init; }
+}
+
 public record ReasoningStreamEvent : StreamChunkEvent
 {
     [JsonPropertyName("delta")]
@@ -198,6 +207,18 @@ public record ToolCallStreamEvent : StreamChunkEvent
     
     [JsonPropertyName("toolCalls")]
     public object[]? ToolCalls { get; init; }
+}
+
+public record ToolResultStreamEvent : StreamChunkEvent
+{
+    [JsonPropertyName("toolCallId")]
+    public required string ToolCallId { get; init; }
+    
+    [JsonPropertyName("result")]
+    public required string Result { get; init; }
+    
+    [JsonPropertyName("isError")]
+    public bool IsError { get; init; }
 }
 
 public record MessageStreamCompleteEvent : StreamChunkEvent
@@ -246,6 +267,15 @@ public record ToolCallEvent : MessageEvent
     public required ToolCall[] ToolCalls { get; init; }
 }
 
+public record ToolsCallAggregateEvent : MessageEvent
+{
+    [JsonPropertyName("toolCalls")]
+    public required ToolCall[] ToolCalls { get; init; }
+    
+    [JsonPropertyName("toolResults")]
+    public ToolCallResult[]? ToolResults { get; init; }
+}
+
 // DTO types (moved from ChatController for reuse)
 public record ChatDto
 {
@@ -273,6 +303,8 @@ public record ChatDto
 [JsonDerivedType(typeof(TextMessageDto), typeDiscriminator: "text")]
 [JsonDerivedType(typeof(ReasoningMessageDto), typeDiscriminator: "reasoning")]
 [JsonDerivedType(typeof(ToolCallMessageDto), typeDiscriminator: "tool_call")]
+[JsonDerivedType(typeof(ToolResultMessageDto), typeDiscriminator: "tool_result")]
+[JsonDerivedType(typeof(ToolsCallAggregateMessageDto), typeDiscriminator: "tools_aggregate")]
 [JsonDerivedType(typeof(UsageMessageDto), typeDiscriminator: "usage")]
 public class MessageDto
 {
@@ -302,7 +334,8 @@ public static class MessageSerializationOptions
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
         // Enable polymorphic serialization with type discriminator
         WriteIndented = false,
-        IncludeFields = false
+        IncludeFields = false,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 }
 
@@ -318,6 +351,7 @@ public class ReasoningMessageDto : MessageDto
     public required string Reasoning { get; set; }
 
     [JsonPropertyName("visibility")]
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public ReasoningVisibility Visibility { get; set; }
 
     public string? GetText() => Visibility == ReasoningVisibility.Encrypted ? null : Reasoning;
@@ -327,6 +361,21 @@ public class ToolCallMessageDto : MessageDto
 {
     [JsonPropertyName("toolCalls")]
     public required ToolCall[] ToolCalls { get; set; }
+}
+
+public class ToolResultMessageDto : MessageDto
+{
+    [JsonPropertyName("toolResults")]
+    public required ToolCallResult[] ToolResults { get; set; }
+}
+
+public class ToolsCallAggregateMessageDto : MessageDto
+{
+    [JsonPropertyName("toolCalls")]
+    public required ToolCall[] ToolCalls { get; set; }
+    
+    [JsonPropertyName("toolResults")]
+    public ToolCallResult[]? ToolResults { get; set; }
 }
 
 public class UsageMessageDto : MessageDto

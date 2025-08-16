@@ -43,7 +43,7 @@
         "ASPNETCORE_ENVIRONMENT": "Test",
         "LLM_API_KEY": "DUMMY"
       },
-      "envFile": "${workspaceFolder}/.env"
+      // "envFile": "${workspaceFolder}/.env"
     },
     {
       "name": "Launch Client (Vite)",

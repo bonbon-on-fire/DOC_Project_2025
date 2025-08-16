@@ -20,6 +20,7 @@ import { createMessageHandlerRegistry } from './messageHandlerRegistry';
 import { createTextMessageHandler } from './handlers/textMessageHandler';
 import { createReasoningMessageHandler } from './handlers/reasoningMessageHandler';
 import { createToolCallMessageHandler } from './handlers/toolCallMessageHandler';
+import { createToolsAggregateMessageHandler } from './handlers/toolsAggregateMessageHandler';
 import { createSlimChatSyncManager } from './slimChatSyncManager';
 import { createSSEParser } from './sseParser';
 import { apiClient } from '$lib/api/client';
@@ -74,6 +75,10 @@ export class HandlerBasedSSEOrchestrator {
 		// Register tool call handler for both streaming updates and complete messages
 		const toolCallHandler = createToolCallMessageHandler(this.chatSyncManager);
 		this.handlerRegistry.register(toolCallHandler);
+		
+		// Register tools aggregate handler for combined tool calls and results
+		const toolsAggregateHandler = createToolsAggregateMessageHandler(this.chatSyncManager);
+		this.handlerRegistry.register(toolsAggregateHandler);
 		// Also register for complete tool call messages (not just updates)
 		// We need a wrapper to register it with a different message type
 		const completeToolCallHandler = {
@@ -254,6 +259,27 @@ export class HandlerBasedSSEOrchestrator {
 							hasToolCallUpdate: !!raw.payload?.toolCallUpdate,
 							toolCallUpdate: raw.payload?.toolCallUpdate
 						});
+					}
+					// Handle tools_call_aggregate as a complete message
+					if (raw.kind === 'tools_call_aggregate') {
+						console.log('[Orchestrator] Tools call aggregate event:', {
+							messageId: raw.messageId,
+							toolCallsCount: raw.payload?.toolCalls?.length,
+							toolResultsCount: raw.payload?.toolResults?.length
+						});
+						const env: MessageCompleteEventEnvelope = {
+							...base,
+							kind: 'tools_aggregate',
+							messageId: String(raw.messageId),
+							sequenceId: Number(raw.sequenceId),
+							payload: {
+								messageType: 'tools_aggregate',
+								toolCalls: raw.payload?.toolCalls || [],
+								toolResults: raw.payload?.toolResults || []
+							}
+						} as MessageCompleteEventEnvelope;
+						this.chatSyncManager.processSSEEvent(env);
+						break;
 					}
 					const env: StreamChunkEventEnvelope = {
 						...base,
