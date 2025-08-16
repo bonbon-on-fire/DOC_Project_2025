@@ -21,28 +21,52 @@
 		messageType: 'tool_call'
 	};
 
-	// Extract tool calls from message
+	// Extract and normalize tool calls from message
 	function getToolCalls(msg: any): Array<{name: string, args: any, id?: string}> {
 		console.log('[ToolCallRenderer] Extracting tool calls from message:', msg);
+		
+		let rawToolCalls: any[] = [];
+		
 		if (msg.toolCalls) {
 			console.log('[ToolCallRenderer] Found toolCalls:', msg.toolCalls);
-			return msg.toolCalls;
-		}
-		if (msg.tool_calls) {
+			rawToolCalls = msg.toolCalls;
+		} else if (msg.tool_calls) {
 			console.log('[ToolCallRenderer] Found tool_calls:', msg.tool_calls);
-			return msg.tool_calls;
-		}
-		if (msg.content && typeof msg.content === 'string') {
+			rawToolCalls = msg.tool_calls;
+		} else if (msg.content && typeof msg.content === 'string') {
 			try {
 				const parsed = JSON.parse(msg.content);
 				if (parsed.tool_calls) {
 					console.log('[ToolCallRenderer] Found tool_calls in content:', parsed.tool_calls);
-					return parsed.tool_calls;
+					rawToolCalls = parsed.tool_calls;
 				}
 			} catch {}
 		}
-		console.log('[ToolCallRenderer] No tool calls found');
-		return [];
+		
+		if (rawToolCalls.length === 0) {
+			console.log('[ToolCallRenderer] No tool calls found');
+			return [];
+		}
+		
+		// Normalize the tool calls to the expected format
+		return rawToolCalls.map(tc => {
+			// Parse function_args if it's a JSON string
+			let args = tc.args || tc.function_args;
+			if (typeof args === 'string') {
+				try {
+					args = JSON.parse(args);
+				} catch (e) {
+					console.warn('[ToolCallRenderer] Failed to parse function_args:', args, e);
+					args = { raw: args }; // Fallback to showing raw string
+				}
+			}
+			
+			return {
+				name: tc.name || tc.function_name || 'unknown',
+				args: args || {},
+				id: tc.id || tc.tool_call_id
+			};
+		});
 	}
 
 	// Convert JSON to YAML-like format with syntax highlighting

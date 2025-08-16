@@ -195,4 +195,36 @@ Debugging follows followig steps:
 
 To achieve above methodology (in absence of debugger access), you MUST use Logs and 'duckdb' to debug the system.
 
-Note: The test mode logs paths.
+#### Guide to Debugging Tests
+
+When fixing failed test, it need to be done in step by step process using sequential thinking.
+
+You MUST use temporary notebooks created in `scratchpad/` directory keep track of 1. checklist, 2. learnings, 3. All the approaches tried to fix, 4. and other random tasks that you need to perform.
+
+##### Step 0
+
+**Act & Observe**: Take step to reproduce the bug and observe the behavior and logs of the system.
+
+##### Step 1
+
+**Assert**: Look at the failure, analyze the code and come up with Root Cause Assertion. Take a note of supporting evidence.
+
+##### Step 2
+
+**Proof of Assertion**: Validate the assertion by adding logs to the code and re-running the tests case. Make sure the changes are only for diagnostic purpose.
+
+##### Step 3
+
+**Design & Plan Fix**: If Root Cause is validated, come up with design changes that may address the root cause. Use supporting evidence to check how these design changes will fix the issue. Use sequential thinking where ever necessary.
+
+##### Step 4
+
+**Plan Fix**: Break down the fix into discrete steps / tasks. Make sure we have noted down the `definition of done` for each task.
+
+##### Step 5
+
+**Apply Fix**: Now that fix is broken down in set of tasks, work through the tasks one by one to write the fix
+
+##### Step 6
+
+**Validate Fix**: Validate test fixes. If tests are still broken go back to Step 1 or Step 3 based on if design was incorrect or root cause analysis was incorrect.

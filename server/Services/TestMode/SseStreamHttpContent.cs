@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.IO.Pipelines;
 using System.Net;
 using System.Net.Http.Headers;
@@ -422,11 +423,22 @@ public sealed class SseStreamHttpContent : HttpContent
         IEnumerable<(string functionName, string argsJson)> toolCalls,
         int wordsPerChunk)
     {
+        var allToolCalls = new List<FunctionContent>();
         int idx = -1;
+        
         foreach (var (functionName, argsJson) in toolCalls)
         {
             idx++;
             var tool_call_id = Guid.NewGuid().ToString();
+            
+            // Store complete tool call for final message
+            allToolCalls.Add(new FunctionContent(
+                tool_call_id,
+                new FunctionCall(functionName, argsJson))
+            {
+                Index = idx,
+            });
+            
             // First chunk: function name with empty arguments
             // This matches OpenAI's actual behavior
             yield return new Choice

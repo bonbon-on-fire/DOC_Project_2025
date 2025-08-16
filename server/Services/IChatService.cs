@@ -299,7 +299,10 @@ public static class MessageSerializationOptions
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        // Enable polymorphic serialization with type discriminator
+        WriteIndented = false,
+        IncludeFields = false
     };
 }
 

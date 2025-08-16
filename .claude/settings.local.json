@@ -27,10 +27,20 @@
       "mcp__playwright__playwright_navigate",
       "Bash(npx playwright install:*)",
       "Bash(powershell:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(move:*)",
+      "mcp__memroy_db__list_tables",
+      "Bash(dir:*)",
+      "mcp__memroy_db__read_query"
     ],
     "deny": [],
     "ask": [],
     "defaultMode": "acceptEdits"
-  }
+  },
+  "enabledMcpjsonServers": [
+    "sequential-thinking-tools",
+    "playwright",
+    "memroy_db",
+    "azure-devops-mcp"
+  ]
 }

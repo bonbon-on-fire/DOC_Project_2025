@@ -70,7 +70,17 @@ export class HandlerBasedSSEOrchestrator {
 		// Register handlers with the sync manager as listener
 		this.handlerRegistry.register(createTextMessageHandler(this.chatSyncManager));
 		this.handlerRegistry.register(createReasoningMessageHandler(this.chatSyncManager));
-		this.handlerRegistry.register(createToolCallMessageHandler(this.chatSyncManager));
+		
+		// Register tool call handler for both streaming updates and complete messages
+		const toolCallHandler = createToolCallMessageHandler(this.chatSyncManager);
+		this.handlerRegistry.register(toolCallHandler);
+		// Also register for complete tool call messages (not just updates)
+		// We need a wrapper to register it with a different message type
+		const completeToolCallHandler = {
+			...toolCallHandler,
+			getMessageType: () => 'tools_call'
+		};
+		this.handlerRegistry.register(completeToolCallHandler);
 	}
 
 	/**

@@ -80,7 +80,8 @@ export class ToolCallMessageHandler extends BaseMessageHandler {
 	}
 	
 	canHandle(messageType: string): boolean {
-		return messageType === 'tools_call_update';
+		// Handle both streaming updates and complete tool call messages
+		return messageType === 'tools_call_update' || messageType === 'tools_call';
 	}
 	
 	getRenderer(): MessageRenderer {
@@ -116,7 +117,31 @@ export class ToolCallMessageHandler extends BaseMessageHandler {
 			});
 		}
 		
-		// Validate payload type
+		// Check if this is a complete tool call message or a streaming update
+		if (envelope.kind === 'tools_call') {
+			// Handle complete tool call message
+			console.log('[ToolCallMessageHandler] Processing complete tool call message');
+			const payload = envelope.payload as any;
+			if (payload.toolCalls && Array.isArray(payload.toolCalls)) {
+				// Set complete tool calls directly
+				snapshot = this.updateSnapshot(messageId, {
+					toolCalls: payload.toolCalls.map((tc: any) => ({
+						id: tc.tool_call_id || tc.id || `${messageId}_tool_${tc.index || 0}`,
+						name: tc.function_name || tc.name || '',
+						args: tc.function_args ? JSON.parse(tc.function_args) : tc.args || {},
+						argsJson: tc.function_args || JSON.stringify(tc.args || {})
+					})),
+					messageType: 'tool_call'
+				});
+				console.log('[ToolCallMessageHandler] Set complete tool calls:', {
+					count: payload.toolCalls.length,
+					toolCalls: snapshot.toolCalls
+				});
+				return snapshot;
+			}
+		}
+		
+		// Validate payload type for streaming updates
 		if (!StreamChunkPayloadGuards.isToolCallUpdateStreamChunk(envelope.payload)) {
 			console.error('[ToolCallMessageHandler] Invalid payload for tool call message:', envelope.messageId, envelope.payload);
 			throw new Error(`Invalid payload for tool call message: ${envelope.messageId}`);

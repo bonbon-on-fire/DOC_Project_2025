@@ -68,7 +68,7 @@ public class ChatService : IChatService
                 Kind = "text",
                 TimestampUtc = userDto.Timestamp,
                 SequenceNumber = userDto.SequenceNumber,
-                MessageJson = JsonSerializer.Serialize<MessageDto>(userDto)
+                MessageJson = JsonSerializer.Serialize<MessageDto>(userDto, MessageSerializationOptions.Default)
             };
 
             var insUser = await _storage.InsertMessageAsync(userRecord);
@@ -96,7 +96,7 @@ public class ChatService : IChatService
                     Kind = "text",
                     TimestampUtc = sysDto.Timestamp,
                     SequenceNumber = sysDto.SequenceNumber,
-                    MessageJson = JsonSerializer.Serialize<MessageDto>(sysDto)
+                    MessageJson = JsonSerializer.Serialize<MessageDto>(sysDto, MessageSerializationOptions.Default)
                 };
                 var insSys = await _storage.InsertMessageAsync(sysRecord);
                 if (!insSys.Success) return new ChatResult { Success = false, Error = insSys.Error };
@@ -143,8 +143,22 @@ public class ChatService : IChatService
                 return new ChatResult { Success = false, Error = chat.Error ?? "Chat not found" };
             }
             var (Success, Error, Messages) = await _storage.ListChatMessagesOrderedAsync(chatId);
+            
+            _logger.LogInformation("Loading messages for chat {ChatId}: Found {Count} messages", chatId, Messages?.Count ?? 0);
+            
             var messages = Success
-                ? Messages.Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!).ToList()
+                ? Messages.Select(m => {
+                    var dto = JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!;
+                    
+                    // Log tool call messages for debugging
+                    if (dto is ToolCallMessageDto toolCallDto)
+                    {
+                        _logger.LogInformation("Loaded tool call message: Id={MessageId}, ToolCalls={ToolCallCount}", 
+                            dto.Id, toolCallDto.ToolCalls?.Length ?? 0);
+                    }
+                    
+                    return dto;
+                }).ToList()
                 : [];
 
             return new ChatResult
@@ -248,7 +262,7 @@ public class ChatService : IChatService
                 Kind = "text",
                 TimestampUtc = userDto.Timestamp,
                 SequenceNumber = userDto.SequenceNumber,
-                MessageJson = JsonSerializer.Serialize<MessageDto>(userDto)
+                MessageJson = JsonSerializer.Serialize<MessageDto>(userDto, MessageSerializationOptions.Default)
             };
             var insUser = await _storage.InsertMessageAsync(userRecord);
             if (!insUser.Success) return new MessageResult { Success = false, Error = insUser.Error };
@@ -280,7 +294,7 @@ public class ChatService : IChatService
                 Kind = "text",
                 TimestampUtc = assistantDto.Timestamp,
                 SequenceNumber = assistantDto.SequenceNumber,
-                MessageJson = JsonSerializer.Serialize<MessageDto>(assistantDto)
+                MessageJson = JsonSerializer.Serialize<MessageDto>(assistantDto, MessageSerializationOptions.Default)
             };
             var insAsst = await _storage.InsertMessageAsync(assistantRecord);
             if (!insAsst.Success) return new MessageResult { Success = false, Error = insAsst.Error };
@@ -370,7 +384,7 @@ public class ChatService : IChatService
             Kind = "text",
             TimestampUtc = userDto.Timestamp,
             SequenceNumber = userDto.SequenceNumber,
-            MessageJson = JsonSerializer.Serialize<MessageDto>(userDto)
+            MessageJson = JsonSerializer.Serialize<MessageDto>(userDto, MessageSerializationOptions.Default)
         });
 
         return new StreamInitResult
@@ -468,10 +482,34 @@ public class ChatService : IChatService
         Type? lastFullMessageType = null;
         await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
         {
+            _logger.LogInformation(
+                "[MIDDLEWARE] Message from middleware stream - Type: {MessageType}, ChatId: {ChatId}",
+                message.GetType().Name,
+                chatId);
+            
+            // Skip streaming update messages - only persist complete messages
+            if (message is ToolsCallUpdateMessage)
+            {
+                _logger.LogTrace(
+                    "Skipping ToolsCallUpdateMessage persistence - these are streaming chunks, not complete messages");
+                continue;
+            }
+            
             fullMessageIndex++;
 
             lastFullMessageType = message.GetType();
-            var fullMessageId = message.GenerationId + $"-{fullMessageIndex:D3}";
+            // Ensure we have a valid generation ID (test mode might not provide one)
+            var generationId = string.IsNullOrEmpty(message.GenerationId) 
+                ? $"gen-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid():N}".Substring(0, 32)
+                : message.GenerationId;
+            var fullMessageId = generationId + $"-{fullMessageIndex:D3}";
+            
+            _logger.LogInformation(
+                "Persisting message from middleware - Type: {MessageType}, MessageId: {MessageId}, ChatId: {ChatId}",
+                message.GetType().Name,
+                fullMessageId,
+                chatId);
+            
             var sequenceNumber = await PersistFullMessage(chatId, message, fullMessageId);
             if (sequenceNumber != fullMessageIndex)
             {
@@ -554,6 +592,13 @@ public class ChatService : IChatService
 
         await foreach (var message in stream.WithCancellation(cancellationToken))
         {
+            // Log every message type we receive from the stream
+            _logger.LogTrace(
+                "Received message from stream - Type: {MessageType}, ChatId: {ChatId}, MessageIndex: {MessageIndex}",
+                message.GetType().Name,
+                chatId,
+                messageIndex);
+            
             if (message.GetType() != lastType)
             {
                 messageIndex++;
@@ -563,7 +608,11 @@ public class ChatService : IChatService
             chunkSequenceId++;
 
             lastType = message.GetType();
-            var messageId = message.GenerationId + $"-{messageIndex:D3}";
+            // Ensure we have a valid generation ID for streaming messages too
+            var generationId = string.IsNullOrEmpty(message.GenerationId) 
+                ? $"gen-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid():N}".Substring(0, 32)
+                : message.GenerationId;
+            var messageId = generationId + $"-{messageIndex:D3}";
 
             if (message is TextUpdateMessage textMessage)
             {
@@ -623,23 +672,95 @@ public class ChatService : IChatService
                     }
                 }
             }
+            else if (message is ToolsCallMessage toolsCallMessage)
+            {
+                // Handle complete tool call messages from the message joiner middleware
+                _logger.LogTrace(
+                    "Processing complete ToolsCallMessage - ChatId: {ChatId}, MessageId: {MessageId}, ToolCallCount: {ToolCallCount}, GenerationId: {GenerationId}",
+                    chatId,
+                    messageId,
+                    toolsCallMessage.ToolCalls.Count,
+                    toolsCallMessage.GenerationId ?? "null");
+                
+                // Log each tool call in detail
+                foreach (var toolCall in toolsCallMessage.ToolCalls)
+                {
+                    _logger.LogTrace(
+                        "Tool call detail - FunctionName: {FunctionName}, ArgsLength: {ArgsLength}, ToolCallId: {ToolCallId}, Index: {Index}",
+                        toolCall.FunctionName,
+                        toolCall.FunctionArgs?.Length ?? 0,
+                        toolCall.ToolCallId ?? "null",
+                        toolCall.Index ?? -1);
+                }
+                
+                // Ensure we have a valid generation ID for tool call message
+                var toolGenId = string.IsNullOrEmpty(toolsCallMessage.GenerationId) 
+                    ? $"gen-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid():N}".Substring(0, 32)
+                    : toolsCallMessage.GenerationId;
+                var fullMessageId = toolGenId + $"-{messageIndex:D3}";
+                
+                _logger.LogInformation(
+                    "Persisting complete ToolsCallMessage - ChatId: {ChatId}, FullMessageId: {FullMessageId}, GenerationId: {GenerationId}, ToolCount: {ToolCount}",
+                    chatId,
+                    fullMessageId,
+                    toolGenId,
+                    toolsCallMessage.ToolCalls.Count);
+                
+                // Persist the complete tool call message with all tools as a single message
+                var sequenceNumber = await PersistFullMessage(chatId, toolsCallMessage, fullMessageId);
+                
+                _logger.LogInformation(
+                    "ToolsCallMessage persisted successfully - ChatId: {ChatId}, FullMessageId: {FullMessageId}, SequenceNumber: {SequenceNumber}",
+                    chatId,
+                    fullMessageId,
+                    sequenceNumber);
+                
+                // Also broadcast it as a complete event
+                if (MessageReceived != null)
+                {
+                    _logger.LogTrace(
+                        "Broadcasting ToolCallEvent - ChatId: {ChatId}, MessageId: {FullMessageId}, ToolCount: {ToolCount}",
+                        chatId,
+                        fullMessageId,
+                        toolsCallMessage.ToolCalls.Count);
+                        
+                    await MessageReceived(
+                        new ToolCallEvent
+                        {
+                            ChatId = chatId,
+                            MessageId = fullMessageId,
+                            Kind = "tool_call",
+                            SequenceNumber = sequenceNumber,
+                            ToolCalls = toolsCallMessage.ToolCalls.ToArray()
+                        });
+                }
+            }
             else if (message is ToolsCallUpdateMessage toolsCallUpdateMessage)
             {
+                // These are streaming chunks - just pass them through for real-time display
+                // The message joiner middleware will accumulate these into a complete ToolsCallMessage
                 int toolCallIndex = 0;
                 var toolCallCount = toolsCallUpdateMessage.ToolCallUpdates.Count();
                 
-                _logger.LogInformation(
-                    "Processing ToolsCallUpdateMessage - ChatId: {ChatId}, BaseMessageId: {MessageId}, ToolCallCount: {ToolCallCount}, BaseSequence: {BaseSequence}",
+                _logger.LogTrace(
+                    "Processing ToolsCallUpdateMessage (streaming chunk) - ChatId: {ChatId}, MessageId: {MessageId}, ToolCallCount: {ToolCallCount}, GenerationId: {GenerationId}",
                     chatId,
                     messageId,
                     toolCallCount,
-                    messageIndex);
+                    generationId);
                 
                 foreach (var toolCallUpdate in toolsCallUpdateMessage.ToolCallUpdates)
                 {
                     // Generate unique message ID for each tool call to avoid duplicate keys on client
                     var toolCallMessageId = $"{messageId}_tool_{toolCallIndex}";
                     var toolCallSequence = messageIndex + toolCallIndex;
+                    
+                    _logger.LogTrace(
+                        "Streaming tool call update - Index: {Index}, FunctionName: {FunctionName}, ArgsLength: {ArgsLength}, ToolCallId: {ToolCallId}",
+                        toolCallUpdate.Index ?? toolCallIndex,
+                        toolCallUpdate.FunctionName ?? "null",
+                        toolCallUpdate.FunctionArgs?.Length ?? 0,
+                        toolCallUpdate.ToolCallId ?? "null");
                     
                     _logger.LogInformation(
                         "ToolCall {ToolIndex}/{ToolCount} - ChatId: {ChatId}, MessageId: {MessageId}, Sequence: {Sequence}, ToolName: {ToolName}, ToolId: {ToolId}",
@@ -668,10 +789,11 @@ public class ChatService : IChatService
                     toolCallIndex++;
                 }
                 
-                _logger.LogInformation(
-                    "Completed ToolsCallUpdateMessage processing - ChatId: {ChatId}, Processed: {ProcessedCount} tool calls",
+                _logger.LogTrace(
+                    "Streamed {Count} tool call updates - ChatId: {ChatId}, GenerationId: {GenerationId}",
+                    toolCallIndex,
                     chatId,
-                    toolCallIndex);
+                    generationId);
             }
 
             yield return message;
@@ -707,7 +829,7 @@ public class ChatService : IChatService
                         SequenceNumber = nextSequence,
                         Reasoning = reasoning.Reasoning,
                         Visibility = reasoning.Visibility
-                    })
+                    }, MessageSerializationOptions.Default)
             },
             TextMessage text => new MessageRecord
             {
@@ -725,7 +847,7 @@ public class ChatService : IChatService
                     Timestamp = timestamp,
                     SequenceNumber = nextSequence,
                     Text = text.Text
-                })
+                }, MessageSerializationOptions.Default)
             },
             UsageMessage usage => new MessageRecord
             {
@@ -744,7 +866,7 @@ public class ChatService : IChatService
                         Timestamp = timestamp,
                         SequenceNumber = nextSequence,
                         Usage = usage.Usage
-                    })
+                    }, MessageSerializationOptions.Default)
             },
             ToolsCallMessage toolsCall => new MessageRecord
             {
@@ -763,14 +885,42 @@ public class ChatService : IChatService
                         Timestamp = timestamp,
                         SequenceNumber = nextSequence,
                         ToolCalls = [.. toolsCall.ToolCalls]
-                    })
+                    }, MessageSerializationOptions.Default)
             },
             _ => null
         };
 
         if (messageRecord != null)
         {
+            _logger.LogInformation(
+                "Persisting message - ChatId: {ChatId}, MessageId: {MessageId}, Role: {Role}, Kind: {Kind}, Sequence: {Sequence}",
+                chatId, fullMessageId, messageRecord.Role, messageRecord.Kind, nextSequence);
             await _storage.InsertMessageAsync(messageRecord);
+            _logger.LogInformation(
+                "Message persisted successfully - ChatId: {ChatId}, MessageId: {MessageId}",
+                chatId, fullMessageId);
+            
+            // Verify the message was actually persisted
+            var (_, _, messages) = await _storage.ListChatMessagesOrderedAsync(chatId);
+            var persistedMsg = messages.FirstOrDefault(m => m.Id == fullMessageId);
+            if (persistedMsg != null)
+            {
+                _logger.LogInformation(
+                    "Verified message persistence - MessageId: {MessageId}, Kind: {Kind}, Role: {Role}",
+                    fullMessageId, persistedMsg.Kind, persistedMsg.Role);
+            }
+            else
+            {
+                _logger.LogError(
+                    "Failed to verify message persistence - MessageId: {MessageId} not found in database",
+                    fullMessageId);
+            }
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Unable to persist message - ChatId: {ChatId}, MessageId: {MessageId}, MessageType: {MessageType}",
+                chatId, fullMessageId, message.GetType().Name);
         }
 
         return nextSequence;
@@ -800,7 +950,7 @@ public class ChatService : IChatService
                 Kind = "text",
                 TimestampUtc = userDto.Timestamp,
                 SequenceNumber = userDto.SequenceNumber,
-                MessageJson = JsonSerializer.Serialize<MessageDto>(userDto)
+                MessageJson = JsonSerializer.Serialize<MessageDto>(userDto, MessageSerializationOptions.Default)
             };
             var ins = await _storage.InsertMessageAsync(userRecord);
             if (!ins.Success) return new MessageResult { Success = false, Error = ins.Error };
@@ -851,7 +1001,7 @@ public class ChatService : IChatService
             Kind = "text",
             TimestampUtc = dto.Timestamp,
             SequenceNumber = dto.SequenceNumber,
-            MessageJson = JsonSerializer.Serialize<MessageDto>(dto)
+            MessageJson = JsonSerializer.Serialize<MessageDto>(dto, MessageSerializationOptions.Default)
         };
         var ins = await _storage.InsertMessageAsync(record);
         if (!ins.Success) throw new InvalidOperationException(ins.Error);

@@ -33,6 +33,7 @@
 	<!-- Sidebar -->
 	<div
 		class="w-80 flex-shrink-0 border-r border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
+		data-testid="chat-sidebar"
 	>
 		<ChatSidebar />
 	</div>
