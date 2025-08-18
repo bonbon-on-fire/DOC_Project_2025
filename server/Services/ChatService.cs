@@ -585,6 +585,16 @@ public class ChatService : IChatService, IToolResultCallback
                 chatId);
             
             var sequenceNumber = await PersistFullMessage(chatId, message, fullMessageId);
+            
+            // Skip further processing for encrypted reasoning messages
+            if (sequenceNumber == -1)
+            {
+                _logger.LogInformation(
+                    "Skipped encrypted reasoning message, not sending to client - ChatId: {ChatId}, MessageId: {MessageId}",
+                    chatId, fullMessageId);
+                continue; // Skip to next message without sending to client
+            }
+            
             if (sequenceNumber != fullMessageIndex)
             {
                 _logger.LogError(
@@ -838,6 +848,15 @@ public class ChatService : IChatService, IToolResultCallback
         IMessage message,
         string fullMessageId)
     {
+        // Skip encrypted reasoning messages entirely - don't persist or assign sequence numbers
+        if (message is ReasoningMessage reasoningMsg && reasoningMsg.Visibility == ReasoningVisibility.Encrypted)
+        {
+            _logger.LogInformation(
+                "Skipping encrypted reasoning message - ChatId: {ChatId}, MessageId: {MessageId}",
+                chatId, fullMessageId);
+            return -1; // Return -1 to indicate no sequence number was assigned
+        }
+        
         var (_, _, nextSequence) = await _storage.AllocateSequenceAsync(chatId);
         var timestamp = DateTime.UtcNow;
         var messageRecord = message switch

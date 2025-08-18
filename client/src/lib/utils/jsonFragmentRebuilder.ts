@@ -1,12 +1,22 @@
 import type { JsonFragmentKind, JsonFragmentUpdate } from '../chat/sseEventTypes';
 
+// Debug flag - can be enabled via environment variable or config
+const DEBUG_PATH_MISMATCHES = false;
+
 // Rebuilds a structured value incrementally from JsonFragmentUpdates
 export class JsonFragmentRebuilder {
   private root: any = undefined;
   private partialBuffers = new Map<string, string>();
   private complete = false;
+  private locked = false;
 
   apply(updates: JsonFragmentUpdate[]): void {
+    // Reject updates after completion boundaries
+    if (this.locked || this.complete) {
+      // Silently ignore - this is expected behavior after completion
+      return;
+    }
+    
     for (const u of updates) {
       switch (u.kind as JsonFragmentKind) {
         case 'StartObject': {
@@ -83,6 +93,7 @@ export class JsonFragmentRebuilder {
         }
         case 'JsonComplete': {
           this.complete = true;
+          this.locked = true;
           break;
         }
         default: {
@@ -98,7 +109,15 @@ export class JsonFragmentRebuilder {
   }
 
   isComplete(): boolean {
-    return this.complete;
+    return this.complete || this.locked;
+  }
+
+  /**
+   * Lock the rebuilder to prevent further updates.
+   * Called when a tool result is received, indicating no more fragments should be accepted.
+   */
+  lockForResult(): void {
+    this.locked = true;
   }
 
   private ensureContainer(path: string, kind: 'object' | 'array'): void {
@@ -115,7 +134,12 @@ export class JsonFragmentRebuilder {
       if (parent[last] === undefined) parent[last] = kind === 'object' ? {} : [];
     } else {
       // array index; ensure array exists and init element if necessary
-      if (!Array.isArray(parent)) return; // defensive; path malformed
+      if (!Array.isArray(parent)) {
+        if (DEBUG_PATH_MISMATCHES) {
+          console.debug(`[JsonFragmentRebuilder] Path/type mismatch: expected array parent for index ${last} at path ${path}`);
+        }
+        return; // defensive; path malformed
+      }
       if (parent[last] === undefined) parent[last] = kind === 'object' ? {} : [];
     }
   }
@@ -133,6 +157,9 @@ export class JsonFragmentRebuilder {
     } else {
       // array index
       if (!Array.isArray(parent)) {
+        if (DEBUG_PATH_MISMATCHES) {
+          console.debug(`[JsonFragmentRebuilder] Path/type mismatch: expected array parent for index ${last} at path ${path}`);
+        }
         // coerce into array if wrong type
         return;
       }
@@ -156,6 +183,9 @@ export class JsonFragmentRebuilder {
       } else {
         // array index
         if (!Array.isArray(cur)) {
+          if (DEBUG_PATH_MISMATCHES) {
+            console.debug(`[JsonFragmentRebuilder] Path/type mismatch in getOrCreate: expected array for index ${seg}`);
+          }
           // if not array, coerce
           return cur;
         }

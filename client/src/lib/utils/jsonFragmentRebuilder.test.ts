@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { JsonFragmentRebuilder } from './jsonFragmentRebuilder';
 import type { JsonFragmentUpdate } from '../chat/sseEventTypes';
 
@@ -55,6 +55,63 @@ describe('JsonFragmentRebuilder', () => {
       { path: 'root.user.age', kind: 'CompleteNumber', textValue: '30' }
     ]);
     expect(r.getValue()).toEqual({ user: { name: 'Ada', age: 30 } });
+  });
+
+  describe('locking mechanism', () => {
+    it('should prevent updates after lockForResult() is called', () => {
+      const r = new JsonFragmentRebuilder();
+      
+      r.apply([
+        { path: 'root', kind: 'StartObject' },
+        { path: 'root.value', kind: 'CompleteNumber', textValue: '1' }
+      ]);
+      
+      // Lock the rebuilder
+      r.lockForResult();
+      expect(r.isComplete()).toBe(true);
+      
+      // Try to apply more updates - should be silently ignored
+      r.apply([
+        { path: 'root.value', kind: 'CompleteNumber', textValue: '2' }
+      ]);
+      
+      // Value should not change
+      expect(r.getValue()).toEqual({ value: 1 });
+    });
+
+    it('should prevent updates after JsonComplete', () => {
+      const r = new JsonFragmentRebuilder();
+      
+      r.apply([
+        { path: 'root', kind: 'StartObject' },
+        { path: 'root.value', kind: 'CompleteNumber', textValue: '1' },
+        { path: 'root', kind: 'JsonComplete' }
+      ]);
+      
+      expect(r.isComplete()).toBe(true);
+      
+      // Try to apply more updates - should be silently ignored
+      r.apply([
+        { path: 'root.value', kind: 'CompleteNumber', textValue: '2' }
+      ]);
+      
+      // Value should not change
+      expect(r.getValue()).toEqual({ value: 1 });
+    });
+
+    it('should set both complete and locked flags on JsonComplete', () => {
+      const r = new JsonFragmentRebuilder();
+      
+      r.apply([
+        { path: 'root', kind: 'JsonComplete' }
+      ]);
+      
+      expect(r.isComplete()).toBe(true);
+      
+      // After locking separately, should still be complete
+      r.lockForResult();
+      expect(r.isComplete()).toBe(true);
+    });
   });
 });
 

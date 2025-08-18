@@ -33,7 +33,8 @@ import type {
 } from '$lib/types/chat';
 import { BaseMessageHandler } from '../messageHandlers';
 import ToolsCallAggregateRenderer from '$lib/components/ToolsCallAggregateRenderer.svelte';
-import { JsonFragmentRebuilder } from '$lib/utils/jsonFragmentRebuilder';
+import { JufStitcherManager } from '$lib/utils/jufStitcherManager';
+import { snapshot } from '$lib/utils/snapshotHelper';
 
 /**
  * Renderer for tools aggregate messages
@@ -74,8 +75,8 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 	private renderer = new ToolsAggregateMessageRenderer();
 	// Map of messageId -> Map of toolCallId -> ToolCallPair
 	private toolCallPairsMap = new Map<string, Map<string, ToolCallPair>>();
-	// Map of messageId -> Map of toolCallId -> JsonFragmentRebuilder
-	private fragmentRebuilders = new Map<string, Map<string, JsonFragmentRebuilder>>();
+	// Manager for JSON fragment rebuilders
+	private fragmentManager = new JufStitcherManager();
 	
 	getMessageType(): string {
 		return 'tools_aggregate';
@@ -96,17 +97,10 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 	 * Process streaming chunk (tool call updates or results)
 	 */
 	processChunk(messageId: string, envelope: StreamChunkEventEnvelope): MessageSnapshot {
-		console.log('[ToolsAggregateMessageHandler] processChunk called:', {
-			messageId,
-			envelopeKind: envelope.kind,
-			payload: envelope.payload
-		});
-		
 		let snapshot = this.getSnapshot(messageId);
 		
 		// Create snapshot if it doesn't exist (first tool call creates the aggregate)
 		if (!snapshot) {
-			console.log('[ToolsAggregateMessageHandler] Creating new aggregate message for:', messageId);
 			snapshot = this.initializeMessage(
 				messageId,
 				envelope.chatId,
@@ -122,7 +116,6 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 			
 			// Initialize map for this message
 			this.toolCallPairsMap.set(messageId, new Map());
-			this.fragmentRebuilders.set(messageId, new Map());
 		}
 		
 		// Handle tool call updates
@@ -179,20 +172,16 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 			pairsMap.set(toolCallId, pair);
 		}
 
-		// Apply JsonFragments if present
+		// Apply JsonFragments if present using the manager
 		if (update.json_update_fragments && update.json_update_fragments.length > 0) {
-			let byMessage = this.fragmentRebuilders.get(messageId);
-			if (!byMessage) {
-				byMessage = new Map();
-				this.fragmentRebuilders.set(messageId, byMessage);
-			}
-			let rebuilder = byMessage.get(toolCallId);
-			if (!rebuilder) {
-				rebuilder = new JsonFragmentRebuilder();
-				byMessage.set(toolCallId, rebuilder);
-			}
-			rebuilder.apply(update.json_update_fragments);
-			pair.toolCall.args = rebuilder.getValue();
+			// Generate document ID for this tool call
+			const docId = `${messageId}:${toolCallId}`;
+			
+			// Apply fragments via manager and get current value
+			const args = this.fragmentManager.apply(docId, update.json_update_fragments);
+			
+			// Use snapshot to ensure Svelte reactivity
+			pair.toolCall.args = snapshot(args);
 		}
 		
 		// Update tool call data
@@ -211,17 +200,11 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 				try {
 					pair.toolCall.args = JSON.parse(currentArgs);
 				} catch {
-					pair.toolCall.args = { partial: currentArgs };
+					// Keep args undefined on parse failure, rely on function_args for raw display
+					pair.toolCall.args = undefined;
 				}
 			}
 		}
-		
-		console.log('[ToolsAggregateMessageHandler] Updated tool call in pair:', {
-			toolCallId,
-			name: pair.toolCall.function_name,
-			hasArgs: !!pair.toolCall.args,
-			hasResult: !!pair.toolResult
-		});
 	}
 	
 	private processToolResult(messageId: string, result: ToolResultStreamChunkPayload) {
@@ -233,7 +216,7 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 		
 		// If pair doesn't exist yet (shouldn't happen normally), create placeholder
 		if (!pair) {
-			console.warn('[ToolsAggregateMessageHandler] Received result for unknown tool call:', result.toolCallId);
+			// Received result for unknown tool call - create placeholder
 			pair = {
 				toolCall: {
 					id: result.toolCallId,
@@ -252,24 +235,15 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 			result: result.result
 		};
 		
-		console.log('[ToolsAggregateMessageHandler] Added result to pair:', {
-			toolCallId: result.toolCallId,
-			isError: result.isError,
-			resultLength: result.result.length,
-			pairComplete: !!(pair.toolCall && pair.toolResult)
-		});
+		// Mark the document as complete since tool result received
+		const docId = `${messageId}:${result.toolCallId}`;
+		this.fragmentManager.complete(docId);
 	}
 	
 	/**
 	 * Complete the aggregate message
 	 */
 	completeMessage(messageId: string, envelope: MessageCompleteEventEnvelope): MessageDto {
-		console.log('[ToolsAggregateMessageHandler] Completing message:', {
-			messageId,
-			kind: envelope.kind,
-			payload: envelope.payload
-		});
-		
 		let snapshot = this.getSnapshot(messageId);
 		let toolCallPairs: ToolCallPair[] = [];
 		
@@ -305,13 +279,6 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 					const toolCallId = toolCall.id || toolCall.tool_call_id || `tool_${toolCall.index}`;
 					const result = resultsMap.get(toolCallId);
 					
-					console.log('[ToolsAggregateMessageHandler] Pairing tool call with result:', {
-						toolCallId,
-						toolName: toolCall.function_name || toolCall.name,
-						hasResult: !!result,
-						resultValue: result?.result?.substring(0, 50)
-					});
-					
 					return {
 						toolCall,
 						toolResult: result
@@ -321,10 +288,6 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 				// If we don't have streaming pairs or server has more complete data, use server pairs
 				if (toolCallPairs.length === 0 || serverPairs.length > toolCallPairs.length) {
 					toolCallPairs = serverPairs;
-					console.log('[ToolsAggregateMessageHandler] Using server pairs:', {
-						count: serverPairs.length,
-						withResults: serverPairs.filter(p => p.toolResult).length
-					});
 				}
 			}
 		}
@@ -348,18 +311,17 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 		
 		// Convert to DTO
 		const dto = this.snapshotToDto(snapshot);
-		console.log('[ToolsAggregateMessageHandler] Final DTO:', {
-			id: dto.id,
-			messageType: dto.messageType,
-			pairsCount: dto.toolCallPairs?.length || 0,
-			pairsWithResults: dto.toolCallPairs?.filter(p => p.toolResult).length || 0
-		});
-		
 		this.emitEvent('message_completed', messageId, envelope.chatId, dto);
 		
-		// Clean up map
+		// Clean up all documents for this message from fragment manager
+		const pairsMapForCleanup = this.toolCallPairsMap.get(messageId);
+		if (pairsMapForCleanup) {
+			const toolCallIds = Array.from(pairsMapForCleanup.keys());
+			this.fragmentManager.finalizeMessage(messageId, toolCallIds);
+		}
+		
+		// Clean up the pairs map itself
 		this.toolCallPairsMap.delete(messageId);
-		this.fragmentRebuilders.delete(messageId);
 		
 		return dto;
 	}
