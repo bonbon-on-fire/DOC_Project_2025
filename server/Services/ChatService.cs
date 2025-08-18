@@ -220,7 +220,17 @@ public class ChatService : IChatService, IToolResultCallback
                     }
                     
                     return dto;
-                }).ToList()
+                })
+                .Where(dto => {
+                    // Filter out encrypted reasoning messages from client view
+                    if (dto is ReasoningMessageDto reasoningDto && reasoningDto.Visibility == ReasoningVisibility.Encrypted)
+                    {
+                        _logger.LogInformation("Filtering out encrypted reasoning message from client view: {MessageId}", dto.Id);
+                        return false;
+                    }
+                    return true;
+                })
+                .ToList()
                 : [];
 
             return new ChatResult
@@ -256,7 +266,9 @@ public class ChatService : IChatService, IToolResultCallback
             {
                 var (msgsSuccess, msgsError, msgsMessages) = await _storage.ListChatMessagesOrderedAsync(c.Id);
                 var messages = msgsSuccess
-                    ? [.. msgsMessages.Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!)]
+                    ? [.. msgsMessages
+                        .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!)
+                        .Where(dto => !(dto is ReasoningMessageDto reasoningDto && reasoningDto.Visibility == ReasoningVisibility.Encrypted))]
                     : new List<MessageDto>();
 
                 chatDtos.Add(new ChatDto
@@ -468,7 +480,8 @@ public class ChatService : IChatService, IToolResultCallback
         var convo = await _storage.ListChatMessagesOrderedAsync(chatId);
         var history = convo.Messages
             .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!)
-            .Where(d => d is TextMessageDto td && !string.IsNullOrWhiteSpace(td.Text))
+            .Where(d => (d is TextMessageDto td && !string.IsNullOrWhiteSpace(td.Text)) || 
+                       d is ReasoningMessageDto) // Include ALL reasoning messages for LLM context
             .ToList();
 
         await StreamChatCompletionAsync(chatId, history, cancellationToken);
@@ -481,7 +494,8 @@ public class ChatService : IChatService, IToolResultCallback
         var (_, _, messages) = await _storage.ListChatMessagesOrderedAsync(chatId, cancellationToken);
         var history = messages
             .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!)
-            .Where(d => d is TextMessageDto td && !string.IsNullOrWhiteSpace(td.Text))
+            .Where(d => (d is TextMessageDto td && !string.IsNullOrWhiteSpace(td.Text)) || 
+                       d is ReasoningMessageDto) // Include ALL reasoning messages for LLM context
             .ToList();
 
         await StreamChatCompletionAsync(chatId, history, cancellationToken);
@@ -586,11 +600,11 @@ public class ChatService : IChatService, IToolResultCallback
             
             var sequenceNumber = await PersistFullMessage(chatId, message, fullMessageId);
             
-            // Skip further processing for encrypted reasoning messages
+            // Skip sending encrypted reasoning messages to client (they have sequence -1)
             if (sequenceNumber == -1)
             {
                 _logger.LogInformation(
-                    "Skipped encrypted reasoning message, not sending to client - ChatId: {ChatId}, MessageId: {MessageId}",
+                    "Encrypted reasoning persisted but not sent to client - ChatId: {ChatId}, MessageId: {MessageId}",
                     chatId, fullMessageId);
                 continue; // Skip to next message without sending to client
             }
@@ -848,16 +862,24 @@ public class ChatService : IChatService, IToolResultCallback
         IMessage message,
         string fullMessageId)
     {
-        // Skip encrypted reasoning messages entirely - don't persist or assign sequence numbers
-        if (message is ReasoningMessage reasoningMsg && reasoningMsg.Visibility == ReasoningVisibility.Encrypted)
+        // For encrypted reasoning messages, persist but don't assign sequence number
+        bool isEncryptedReasoning = message is ReasoningMessage reasoningMsg && reasoningMsg.Visibility == ReasoningVisibility.Encrypted;
+        
+        int nextSequence;
+        if (isEncryptedReasoning)
         {
+            // Use -1 for encrypted reasoning to exclude from client view
+            nextSequence = -1;
             _logger.LogInformation(
-                "Skipping encrypted reasoning message - ChatId: {ChatId}, MessageId: {MessageId}",
+                "Persisting encrypted reasoning without sequence number - ChatId: {ChatId}, MessageId: {MessageId}",
                 chatId, fullMessageId);
-            return -1; // Return -1 to indicate no sequence number was assigned
+        }
+        else
+        {
+            var (_, _, allocatedSequence) = await _storage.AllocateSequenceAsync(chatId);
+            nextSequence = allocatedSequence;
         }
         
-        var (_, _, nextSequence) = await _storage.AllocateSequenceAsync(chatId);
         var timestamp = DateTime.UtcNow;
         var messageRecord = message switch
         {
@@ -1155,7 +1177,8 @@ public class ChatService : IChatService, IToolResultCallback
             var (_, _, listMessages) = await _storage.ListChatMessagesOrderedAsync(chatId);
             var history = listMessages
                 .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!)
-                .Where(d => d is TextMessageDto td && !string.IsNullOrWhiteSpace(td.Text))
+                .Where(d => (d is TextMessageDto td && !string.IsNullOrWhiteSpace(td.Text)) || 
+                           d is ReasoningMessageDto) // Include ALL reasoning messages for LLM context
                 .ToList();
             var lmMessages = history.Select(ConvertToLmMessage).ToList();
 
