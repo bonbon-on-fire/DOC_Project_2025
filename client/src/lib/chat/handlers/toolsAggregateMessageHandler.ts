@@ -33,6 +33,7 @@ import type {
 } from '$lib/types/chat';
 import { BaseMessageHandler } from '../messageHandlers';
 import ToolsCallAggregateRenderer from '$lib/components/ToolsCallAggregateRenderer.svelte';
+import { JsonFragmentRebuilder } from '$lib/utils/jsonFragmentRebuilder';
 
 /**
  * Renderer for tools aggregate messages
@@ -73,6 +74,8 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 	private renderer = new ToolsAggregateMessageRenderer();
 	// Map of messageId -> Map of toolCallId -> ToolCallPair
 	private toolCallPairsMap = new Map<string, Map<string, ToolCallPair>>();
+	// Map of messageId -> Map of toolCallId -> JsonFragmentRebuilder
+	private fragmentRebuilders = new Map<string, Map<string, JsonFragmentRebuilder>>();
 	
 	getMessageType(): string {
 		return 'tools_aggregate';
@@ -119,6 +122,7 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 			
 			// Initialize map for this message
 			this.toolCallPairsMap.set(messageId, new Map());
+			this.fragmentRebuilders.set(messageId, new Map());
 		}
 		
 		// Handle tool call updates
@@ -174,6 +178,22 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 			};
 			pairsMap.set(toolCallId, pair);
 		}
+
+		// Apply JsonFragments if present
+		if (update.json_update_fragments && update.json_update_fragments.length > 0) {
+			let byMessage = this.fragmentRebuilders.get(messageId);
+			if (!byMessage) {
+				byMessage = new Map();
+				this.fragmentRebuilders.set(messageId, byMessage);
+			}
+			let rebuilder = byMessage.get(toolCallId);
+			if (!rebuilder) {
+				rebuilder = new JsonFragmentRebuilder();
+				byMessage.set(toolCallId, rebuilder);
+			}
+			rebuilder.apply(update.json_update_fragments);
+			pair.toolCall.args = rebuilder.getValue();
+		}
 		
 		// Update tool call data
 		if (update.function_name) {
@@ -181,17 +201,18 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 			pair.toolCall.name = update.function_name;
 		}
 		
-		// Accumulate function arguments
+		// Accumulate function arguments (fallback + persistence parity)
 		if (update.function_args) {
 			const currentArgs = (pair.toolCall.function_args || '') + update.function_args;
 			pair.toolCall.function_args = currentArgs;
 			
-			// Try to parse accumulated JSON
-			try {
-				pair.toolCall.args = JSON.parse(currentArgs);
-			} catch {
-				// Keep as partial JSON string
-				pair.toolCall.args = { partial: currentArgs };
+			// If no fragments were applied, try to parse accumulated JSON as a best-effort
+			if (!(update.json_update_fragments && update.json_update_fragments.length > 0)) {
+				try {
+					pair.toolCall.args = JSON.parse(currentArgs);
+				} catch {
+					pair.toolCall.args = { partial: currentArgs };
+				}
 			}
 		}
 		
@@ -338,6 +359,7 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 		
 		// Clean up map
 		this.toolCallPairsMap.delete(messageId);
+		this.fragmentRebuilders.delete(messageId);
 		
 		return dto;
 	}

@@ -21,7 +21,7 @@ export function registerBuiltInToolRenderers(): void {
 	
 	// Register Calculator Tool Renderer
 	const calculatorRenderer: ToolRenderer = {
-		toolNamePattern: /^(calculator|math|calc|compute|evaluate)/i,
+		toolNamePattern: /^(calculate|calculator|math|calc|compute|evaluate)/i,
 		priority: 10,
 		supportsStreaming: true
 	};

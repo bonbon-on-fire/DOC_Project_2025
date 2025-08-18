@@ -9,7 +9,7 @@ public sealed class TestSseMessageHandler : HttpMessageHandler
     private static readonly ILogger? Logger = null; // Disable logging to avoid null issues
     
     public int WordsPerChunk { get; set; } = 10;
-    public int ChunkDelayMs { get; set; } = 100;
+    public int ChunkDelayMs { get; set; } = 500;
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {

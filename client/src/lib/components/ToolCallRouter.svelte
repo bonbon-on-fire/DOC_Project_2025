@@ -16,6 +16,7 @@
 	let renderError: Error | null = null;
 	let RendererComponent: any = null;
 	let isLoading = true;
+	let lastResolvedToolName: string | null = null;
 	
 	// Extract tool name from the tool call
 	function getToolName(pair: ToolCallPair): string {
@@ -30,15 +31,29 @@
 	 */
 	async function resolveRenderer() {
 		try {
+			const toolName = getToolName(toolCallPair);
+			
+			// Skip re-resolution if we already resolved this tool
+			if (lastResolvedToolName === toolName && RendererComponent) {
+				console.log(`[ToolCallRouter] Skipping re-resolution for tool: '${toolName}' (already loaded)`);
+				return;
+			}
+			
 			renderError = null;
 			isLoading = true;
+			lastResolvedToolName = toolName;
 			
-			const toolName = getToolName(toolCallPair);
+			console.log(`[ToolCallRouter] Resolving renderer for tool: '${toolName}'`);
 			
 			// Get the component from the tool renderer registry
 			const component = await getToolRendererComponent(toolName);
 			
 			if (component) {
+				console.log(`[ToolCallRouter] Found renderer component for '${toolName}':`, component.name || 'AnonymousComponent');
+				// Special logging for calculator tool
+				if (toolName === 'calculate' || toolName.toLowerCase().includes('calc')) {
+					console.log(`[ToolCallRouter] Calculator tool detected! Component:`, component);
+				}
 				RendererComponent = component;
 			} else {
 				// No renderer found - this shouldn't happen if default is registered
@@ -64,8 +79,9 @@
 		mounted = false;
 	});
 	
-	// Re-resolve renderer if tool call changes
-	$: if (mounted && toolCallPair) {
+	// Re-resolve renderer only if tool name changes
+	$: currentToolName = getToolName(toolCallPair);
+	$: if (mounted && currentToolName !== lastResolvedToolName) {
 		resolveRenderer();
 	}
 	

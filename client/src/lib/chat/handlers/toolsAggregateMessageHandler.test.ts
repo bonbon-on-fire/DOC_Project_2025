@@ -139,7 +139,55 @@ describe('ToolsAggregateMessageHandler', () => {
 
 			expect(snapshot.toolCalls).toHaveLength(1);
 			expect(snapshot.toolCalls[0].function_args).toBe('{"x":10,"y":20}');
-			expect(snapshot.toolCalls[0].args).toEqual({ x: 10, y: 20 });
+		expect(snapshot.toolCalls[0].args).toEqual({ x: 10, y: 20 });
+		});
+
+		it('should build args from JsonFragments when provided', () => {
+			const envelope1: StreamChunkEventEnvelope = {
+				chatId: 'chat-1',
+				messageId: 'msg-2',
+				version: 1,
+				ts: '2024-01-01T00:00:00Z',
+				kind: 'tools_call_update',
+				sequenceId: 1,
+				payload: {
+					delta: '',
+					toolCallUpdate: {
+						tool_call_id: 'call-frag',
+						function_name: 'compose',
+						index: 0,
+						json_update_fragments: [
+							{ path: 'root', kind: 'StartObject' },
+							{ path: 'root.title', kind: 'PartialString', textValue: 'He' }
+						]
+					}
+				}
+			};
+
+			const envelope2: StreamChunkEventEnvelope = {
+				chatId: 'chat-1',
+				messageId: 'msg-2',
+				version: 1,
+				ts: '2024-01-01T00:00:01Z',
+				kind: 'tools_call_update',
+				sequenceId: 2,
+				payload: {
+					delta: '',
+					toolCallUpdate: {
+						tool_call_id: 'call-frag',
+						index: 0,
+						json_update_fragments: [
+							{ path: 'root.title', kind: 'PartialString', textValue: 'llo' },
+							{ path: 'root.title', kind: 'CompleteString', textValue: '"Hello"' }
+						]
+					}
+				}
+			};
+
+			handler.processChunk('msg-2', envelope1);
+			const snapshot = handler.processChunk('msg-2', envelope2);
+			expect(snapshot.toolCalls).toHaveLength(1);
+			expect(snapshot.toolCalls[0].args).toEqual({ title: 'Hello' });
 		});
 
 		it('should handle multiple tool calls', () => {
@@ -228,8 +276,8 @@ describe('ToolsAggregateMessageHandler', () => {
 
 			expect(snapshot.toolCalls).toHaveLength(1);
 			expect(snapshot.toolResults).toHaveLength(1);
-			expect(snapshot.toolResults[0].toolCallId).toBe('call-1');
-			expect(snapshot.toolResults[0].result).toBe('Weather in London: Rainy, 15°C');
+			expect(snapshot.toolResults![0].toolCallId).toBe('call-1');
+			expect(snapshot.toolResults![0].result).toBe('Weather in London: Rainy, 15°C');
 		});
 
 		it('should handle out-of-order results', () => {
@@ -272,7 +320,7 @@ describe('ToolsAggregateMessageHandler', () => {
 
 			expect(snapshot.toolCalls).toHaveLength(1);
 			expect(snapshot.toolResults).toHaveLength(1);
-			expect(snapshot.toolResults[0].result).toBe('Result arrived early');
+			expect(snapshot.toolResults![0].result).toBe('Result arrived early');
 		});
 
 		it('should handle error results', () => {
@@ -312,7 +360,7 @@ describe('ToolsAggregateMessageHandler', () => {
 			const snapshot = handler.processChunk('msg-1', errorResultEnvelope);
 
 			expect(snapshot.toolResults).toHaveLength(1);
-			expect(snapshot.toolResults[0].result).toContain('Error');
+			expect(snapshot.toolResults![0].result).toContain('Error');
 		});
 	});
 

@@ -38,6 +38,13 @@ public static class SSEEventExtensions
                 ToolCalls = aggregateEvent.ToolCalls,
                 ToolResults = aggregateEvent.ToolResults
             },
+            ToolResultStreamEvent toolResultEvent => new ToolResultStreamChunkPayload
+            {
+                Delta = "", // Required property for base class
+                ToolCallId = toolResultEvent.ToolCallId,
+                Result = toolResultEvent.Result,
+                IsError = toolResultEvent.IsError
+            },
             _ => throw new InvalidOperationException($"Unsupported stream event type: {streamEvent.GetType().Name}")
         };
 

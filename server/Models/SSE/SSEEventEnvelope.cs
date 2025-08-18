@@ -108,6 +108,21 @@ public class ToolsCallAggregatePayload : StreamChunkPayload
 }
 
 /// <summary>
+/// Payload for tool result streaming chunks
+/// </summary>
+public class ToolResultStreamChunkPayload : StreamChunkPayload
+{
+    [JsonPropertyName("toolCallId")]
+    public required string ToolCallId { get; set; }
+    
+    [JsonPropertyName("result")]
+    public required string Result { get; set; }
+    
+    [JsonPropertyName("isError")]
+    public bool IsError { get; set; }
+}
+
+/// <summary>
 /// Envelope for complete message events
 /// </summary>
 public class MessageCompleteEventEnvelope : SSEEventEnvelope

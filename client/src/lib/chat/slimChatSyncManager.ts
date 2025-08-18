@@ -45,17 +45,22 @@ export class SlimChatSyncManager implements HandlerEventListener {
 
 	/** Map server event id + kind to a stable, UI-unique message id */
 	private toDisplayId(kind: string, messageId: string): string {
+		/*
+		* Ignore defensive programming...
 		// For tool-related events, map them all to the same aggregate message ID
 		// This ensures tool_call_update and tool_result go to the same message
-		if (kind === 'tools_call_update' || kind === 'tool_result' || kind === 'tools_aggregate') {
-			return `${messageId}:tools_aggregate`;
+		if (kind === 'tools_call_update'
+			|| kind === 'tool_result'
+			|| kind === 'tools_aggregate') {
+			return messageId;
 		}
 		// Ensure reasoning/text/tools do not collide if server reuses ids
 		// Include all known message types to prevent ID collisions
 		if (kind === 'text' || kind === 'reasoning' || 
 		    kind === 'tool_call' || kind === 'usage') {
-			return `${messageId}:${kind}`;
+			return messageId;
 		}
+		*/
 		return messageId;
 	}
 
@@ -375,7 +380,7 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			messageType: dto.messageType,
 			role: dto.role,
 			sequenceNumber: dto.sequenceNumber,
-			hasToolCalls: !!(dto as any).toolCalls
+			hasToolCalls: this.hasToolCalls(dto)
 		});
 		
 		// Check if this message already exists in chat (from placeholder creation)
@@ -491,13 +496,21 @@ export class SlimChatSyncManager implements HandlerEventListener {
 		}));
 	}
 
+	// Helper method to check if a message has tool calls
+	private hasToolCalls(dto: MessageDto): boolean {
+		if (dto.messageType === 'tools_aggregate') {
+			return !!((dto as any).toolCallPairs && (dto as any).toolCallPairs.length > 0);
+		}
+		return !!(dto as any).toolCalls;
+	}
+
 	// Helper methods for chat state management
 	private addMessageToChat(messageDto: MessageDto): void {
 		console.log('[SlimChatSyncManager] addMessageToChat called:', {
 			messageId: messageDto.id,
 			messageType: messageDto.messageType,
-			hasToolCalls: !!(messageDto as any).toolCalls,
-			toolCallsCount: (messageDto as any).toolCalls?.length || 0
+			hasToolCalls: this.hasToolCalls(messageDto),
+			toolCallsCount: (messageDto as any).toolCalls?.length || (messageDto as any).toolCallPairs?.length || 0
 		});
 		
 		this.currentChatStore.update(chat => {
@@ -531,8 +544,8 @@ export class SlimChatSyncManager implements HandlerEventListener {
 		console.log('[SlimChatSyncManager] updateMessageInChat called:', {
 			messageId,
 			newMessageType: dto.messageType,
-			hasToolCalls: !!(dto as any).toolCalls,
-			toolCallsCount: (dto as any).toolCalls?.length || 0
+			hasToolCalls: this.hasToolCalls(dto),
+			toolCallsCount: (dto as any).toolCalls?.length || (dto as any).toolCallPairs?.length || 0
 		});
 		
 		this.currentChatStore.update(chat => {
@@ -548,8 +561,8 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			console.log('[SlimChatSyncManager] Updated message in chat:', {
 				messageId,
 				updatedMessageType: updatedMessage?.messageType,
-				hasToolCalls: !!(updatedMessage as any)?.toolCalls,
-				toolCallsCount: (updatedMessage as any)?.toolCalls?.length || 0
+				hasToolCalls: updatedMessage ? this.hasToolCalls(updatedMessage) : false,
+				toolCallsCount: (updatedMessage as any)?.toolCalls?.length || (updatedMessage as any)?.toolCallPairs?.length || 0
 			});
 			
 			return updatedChat;
@@ -608,6 +621,12 @@ export class SlimChatSyncManager implements HandlerEventListener {
                 console.log('[SlimChatSyncManager] Storing tool calls in streaming state:', {
                     messageId,
                     toolCalls: updated.toolCalls
+                });
+            } else if (messageType === 'tools_aggregate') {
+                updated.toolCallPairs = snapshot.toolCallPairs || [];
+                console.log('[SlimChatSyncManager] Storing tool call pairs in streaming state:', {
+                    messageId,
+                    toolCallPairs: updated.toolCallPairs
                 });
             }
             next.streamingSnapshots = { ...cleared, [messageId]: updated };

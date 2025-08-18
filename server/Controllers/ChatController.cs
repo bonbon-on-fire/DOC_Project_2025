@@ -161,6 +161,7 @@ public class ChatController : ControllerBase
                 initResult.UserMessageId,
                 initResult.UserTimestamp,
                 initResult.UserSequenceNumber);
+
             var initId = $"{initResult.ChatId}<|>{initResult.UserMessageId}";
             await SendSseEvent("init", initEnvelope, initId);
 

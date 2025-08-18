@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { ToolRendererProps } from '$lib/types/toolRenderer';
 	import type { ToolRenderer } from '$lib/types/toolRenderer';
+	import { onMount } from 'svelte';
 	
 	// Accept standard tool renderer props
 	export let toolCallPair: ToolRendererProps['toolCallPair'];
@@ -9,9 +10,13 @@
 	export let index: number = 0;
 	export let expanded: boolean = true;
 	
+	onMount(() => {
+		console.log('[CalculatorToolRenderer] Mounted with tool:', toolCallPair.toolCall);
+	});
+	
 	// Renderer interface implementation
 	const rendererInterface: ToolRenderer = {
-		toolNamePattern: /^(calculator|math|calc|compute|evaluate)/i,
+		toolNamePattern: /^(calculate|calculator|math|calc|compute|evaluate)/i,
 		priority: 10,
 		supportsStreaming: true,
 		getPreviewContent: (pair) => {
@@ -28,6 +33,10 @@
 	function getExpression(pair: typeof toolCallPair): string {
 		const args = pair.toolCall.function_args || pair.toolCall.args;
 		let parsed = args;
+
+		if (!parsed) {
+			return '';
+		}
 		
 		if (typeof args === 'string') {
 			try {
@@ -163,9 +172,9 @@
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
 					  d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
 			</svg>
-			<span class="calc-title text-lg font-semibold">
-				{toolName}
-			</span>
+			<button class="calc-title text-lg font-semibold" role="button">
+				Math Calculation
+			</button>
 		</div>
 		{#if toolCallPair.toolCall.id || toolCallPair.toolCall.tool_call_id}
 			<span class="calc-id text-xs">
@@ -247,6 +256,10 @@
 	.calc-title {
 		color: #e2e8f0;
 		font-weight: 500;
+		background: none;
+		border: none;
+		cursor: default;
+		padding: 0;
 	}
 	
 	.calc-id {

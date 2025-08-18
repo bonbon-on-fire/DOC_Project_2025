@@ -88,7 +88,9 @@ public class ChatService : IChatService, IToolResultCallback
     private string? _currentChatId;
     private string? _currentMessageId;
     private int _nextSequence;
-    
+    // Map ToolCallId to MessageId and SequenceNumber for proper correlation
+    private readonly Dictionary<string, (string MessageId, int SequenceNumber)> _toolCallToMessageMap = new();
+
     // Events for real-time notifications
     public event Func<MessageCreatedEvent, Task>? MessageCreated;
     public event Func<StreamChunkEvent, Task>? StreamChunkReceived;
@@ -493,6 +495,7 @@ public class ChatService : IChatService, IToolResultCallback
         // Set context for tool result callbacks
         _currentChatId = chatId;
         _nextSequence = history.Count > 0 ? history.Max(m => m.SequenceNumber) + 1 : 0;
+        _toolCallToMessageMap.Clear(); // Clear mapping for new stream
         
         _logger.LogInformation("[DEBUG] StreamChatCompletionAsync - ChatId: {ChatId}, History count: {Count}", chatId, history.Count);
         foreach (var msg in history)
@@ -639,9 +642,9 @@ public class ChatService : IChatService, IToolResultCallback
                     _ => null
                 };
 
-                if (evt != null) 
+                if (evt != null)
                 {
-                    // Log tool call completion details
+                    // Log tool call completion details and map tool calls to message IDs
                     if (evt is ToolCallEvent toolCallEvt)
                     {
                         _logger.LogInformation(
@@ -758,27 +761,38 @@ public class ChatService : IChatService, IToolResultCallback
                 // The message joiner middleware will accumulate these into a complete ToolsCallMessage
                 int toolCallIndex = 0;
                 var toolCallCount = toolsCallUpdateMessage.ToolCallUpdates.Count();
-
+                
                 _logger.LogTrace(
                     "Processing ToolsCallUpdateMessage (streaming chunk) - ChatId: {ChatId}, MessageId: {MessageId}, ToolCallCount: {ToolCallCount}, GenerationId: {GenerationId}",
                     chatId,
                     messageId,
                     toolCallCount,
                     generationId);
-
+                
                 foreach (var toolCallUpdate in toolsCallUpdateMessage.ToolCallUpdates)
                 {
                     // Generate unique message ID for each tool call to avoid duplicate keys on client
-                    var toolCallMessageId = $"{messageId}_tool_{toolCallIndex}";
+                    var toolCallMessageId = $"{messageId}";
                     var toolCallSequence = messageIndex + toolCallIndex;
-
+                    
+                    // Map ToolCallId to MessageId and SequenceNumber when we first see it during streaming
+                    if (!string.IsNullOrEmpty(toolCallUpdate.ToolCallId) && !_toolCallToMessageMap.ContainsKey(toolCallUpdate.ToolCallId))
+                    {
+                        _toolCallToMessageMap[toolCallUpdate.ToolCallId] = (toolCallMessageId, toolCallSequence);
+                        _logger.LogInformation(
+                            "Mapped ToolCallId {ToolCallId} to MessageId {MessageId} with Sequence {Sequence} during streaming",
+                            toolCallUpdate.ToolCallId,
+                            toolCallMessageId,
+                            toolCallSequence);
+                    }
+                    
                     _logger.LogTrace(
                         "Streaming tool call update - Index: {Index}, FunctionName: {FunctionName}, ArgsLength: {ArgsLength}, ToolCallId: {ToolCallId}",
                         toolCallUpdate.Index ?? toolCallIndex,
                         toolCallUpdate.FunctionName ?? "null",
                         toolCallUpdate.FunctionArgs?.Length ?? 0,
                         toolCallUpdate.ToolCallId ?? "null");
-
+                    
                     _logger.LogInformation(
                         "ToolCall {ToolIndex}/{ToolCount} - ChatId: {ChatId}, MessageId: {MessageId}, Sequence: {Sequence}, ToolName: {ToolName}, ToolId: {ToolId}",
                         toolCallIndex + 1,
@@ -788,7 +802,7 @@ public class ChatService : IChatService, IToolResultCallback
                         toolCallSequence,
                         toolCallUpdate.FunctionName ?? "unknown",
                         toolCallUpdate.ToolCallId ?? $"idx_{toolCallUpdate.Index}");
-
+                    
                     if (StreamChunkReceived != null)
                     {
                         await StreamChunkReceived(
@@ -805,7 +819,7 @@ public class ChatService : IChatService, IToolResultCallback
                     }
                     toolCallIndex++;
                 }
-
+                
                 _logger.LogTrace(
                     "Streamed {Count} tool call updates - ChatId: {ChatId}, GenerationId: {GenerationId}",
                     toolCallIndex,
@@ -1189,15 +1203,40 @@ public class ChatService : IChatService, IToolResultCallback
     public async Task OnToolResultAvailableAsync(string toolCallId, ToolCallResult result, CancellationToken cancellationToken = default)
     {
         // Stream result to client immediately if we're in a streaming context
-        if (StreamChunkReceived != null && !string.IsNullOrEmpty(_currentChatId) && !string.IsNullOrEmpty(_currentMessageId))
+        if (StreamChunkReceived != null && !string.IsNullOrEmpty(_currentChatId))
         {
+            // Resolve the messageId and sequence number from our mapping
+            string messageId;
+            int sequenceNumber;
+            if (_toolCallToMessageMap.TryGetValue(toolCallId, out var mappedData))
+            {
+                messageId = mappedData.MessageId;
+                sequenceNumber = mappedData.SequenceNumber;
+                _logger.LogInformation(
+                    "Resolved ToolCallId {ToolCallId} to MessageId {MessageId} with Sequence {Sequence} for result streaming",
+                    toolCallId,
+                    messageId,
+                    sequenceNumber);
+            }
+            else
+            {
+                // Fallback to current message ID and next sequence if mapping not found
+                messageId = _currentMessageId ?? $"unmapped-{toolCallId}";
+                sequenceNumber = _nextSequence++;
+                _logger.LogWarning(
+                    "Could not resolve ToolCallId {ToolCallId} to MessageId, using fallback: {MessageId} with Sequence {Sequence}",
+                    toolCallId,
+                    messageId,
+                    sequenceNumber);
+            }
+            
             await StreamChunkReceived(new ToolResultStreamEvent
             {
                 ChatId = _currentChatId,
-                MessageId = $"{_currentMessageId}_result_{toolCallId}",
+                MessageId = messageId,
                 Kind = "tool_result",
                 Done = true,
-                SequenceNumber = _nextSequence++,
+                SequenceNumber = sequenceNumber,
                 ChunkSequenceId = 0,
                 ToolCallId = toolCallId,
                 Result = result.Result,
@@ -1208,15 +1247,64 @@ public class ChatService : IChatService, IToolResultCallback
     
     public async Task OnToolCallStartedAsync(string toolCallId, string functionName, string functionArgs, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Tool call started - ToolCallId: {ToolCallId}, Function: {FunctionName}", 
-            toolCallId, functionName);
+        // Log with message ID and sequence mapping if available
+        if (_toolCallToMessageMap.TryGetValue(toolCallId, out var mappedData))
+        {
+            _logger.LogInformation("Tool call started - ToolCallId: {ToolCallId}, MessageId: {MessageId}, Sequence: {Sequence}, Function: {FunctionName}", 
+                toolCallId, mappedData.MessageId, mappedData.SequenceNumber, functionName);
+        }
+        else
+        {
+            _logger.LogInformation("Tool call started - ToolCallId: {ToolCallId}, Function: {FunctionName} (no message mapping yet)", 
+                toolCallId, functionName);
+        }
         await Task.CompletedTask;
     }
     
     public async Task OnToolCallErrorAsync(string toolCallId, string functionName, string error, CancellationToken cancellationToken = default)
     {
-        _logger.LogError("Tool call error - ToolCallId: {ToolCallId}, Function: {FunctionName}, Error: {Error}", 
-            toolCallId, functionName, error);
+        // Log with message ID and sequence mapping if available
+        if (_toolCallToMessageMap.TryGetValue(toolCallId, out var mappedData))
+        {
+            _logger.LogError("Tool call error - ToolCallId: {ToolCallId}, MessageId: {MessageId}, Sequence: {Sequence}, Function: {FunctionName}, Error: {Error}", 
+                toolCallId, mappedData.MessageId, mappedData.SequenceNumber, functionName, error);
+        }
+        else
+        {
+            _logger.LogError("Tool call error - ToolCallId: {ToolCallId}, Function: {FunctionName}, Error: {Error} (no message mapping)", 
+                toolCallId, functionName, error);
+        }
+        
+        // Stream error events to client if needed
+        if (StreamChunkReceived != null && !string.IsNullOrEmpty(_currentChatId))
+        {
+            string resolvedMessageId;
+            int resolvedSequence;
+            if (_toolCallToMessageMap.TryGetValue(toolCallId, out var mappedData2))
+            {
+                resolvedMessageId = mappedData2.MessageId;
+                resolvedSequence = mappedData2.SequenceNumber;
+            }
+            else
+            {
+                resolvedMessageId = _currentMessageId ?? $"unmapped-{toolCallId}";
+                resolvedSequence = _nextSequence++;
+            }
+            
+            await StreamChunkReceived(new ToolResultStreamEvent
+            {
+                ChatId = _currentChatId,
+                MessageId = resolvedMessageId,
+                Kind = "tool_result",
+                Done = true,
+                SequenceNumber = resolvedSequence,
+                ChunkSequenceId = 0,
+                ToolCallId = toolCallId,
+                Result = $"Error: {error}",
+                IsError = true
+            });
+        }
+        
         await Task.CompletedTask;
     }
     

@@ -34,14 +34,16 @@
       "mcp__memroy_db__read_query",
       "Bash(tasklist)",
       "mcp__sequential-thinking-tools__sequentialthinking",
-      "Bash(cmd /c:*)"
+      "Bash(cmd /c:*)",
+      "Bash(npm run dev:*)"
     ],
     "deny": [],
     "ask": [],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [
       "B:\\b\\sources\\DOC_Project_2025\\submodules\\LmDotnetTools\\src",
-      "B:\\b\\sources\\DOC_Project_2025"
+      "B:\\b\\sources\\DOC_Project_2025",
+      "B:\\mnt\\b\\sources\\DOC_Project_2025"
     ]
   },
   "enabledMcpjsonServers": [

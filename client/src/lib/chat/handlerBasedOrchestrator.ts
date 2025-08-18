@@ -253,6 +253,23 @@ export class HandlerBasedSSEOrchestrator {
 							toolCallUpdate: raw.payload?.toolCallUpdate
 						});
 					}
+					// Handle tool_result events
+					if (raw.kind === 'tool_result') {
+						console.log('[Orchestrator] Tool result event:', {
+							messageId: raw.messageId,
+							toolCallId: raw.payload?.toolCallId,
+							isError: raw.payload?.isError
+						});
+						const env: StreamChunkEventEnvelope = {
+							...base,
+							kind: 'tool_result',
+							messageId: String(raw.messageId),
+							sequenceId: Number(raw.sequenceId),
+							payload: raw.payload
+						} as StreamChunkEventEnvelope;
+						this.chatSyncManager.processSSEEvent(env);
+						break;
+					}
 					// Handle tools_call_aggregate as a complete message
 					if (raw.kind === 'tools_call_aggregate') {
 						console.log('[Orchestrator] Tools call aggregate event:', {
