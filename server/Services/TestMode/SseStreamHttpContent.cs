@@ -168,20 +168,11 @@ public sealed class SseStreamHttpContent : HttpContent
         else
         {
             var reasoning = string.Empty;
-            var text = string.Empty;
-
-            if (!string.IsNullOrEmpty(_userMessage))
-            {
-                if (_reasoningFirst)
-                {
-                    reasoning = $"<|user_pre|><|reasoning|> {_userMessage}";
-                }
-
-                text = $"<|user_pre|><|text_message|> {_userMessage}";
-            }
+            var text = $"<|user_pre|><|text_message|> {_userMessage}";
 
             if (_reasoningFirst)
             {
+                reasoning = $"<|user_pre|><|reasoning|> {_userMessage}";
                 reasoning += string.Join(" ", GenerateReasoningTokens(_wordsPerChunk));
                 reasoning += $"<|user_post|><|reasoning|> {_userMessage}";
             }
@@ -329,7 +320,7 @@ public sealed class SseStreamHttpContent : HttpContent
 
         for (int i = 0; i < basis.Length; i += wordsPerChunk)
         {
-            var chunkTokens = basis.Skip(i).Take(Math.Min(wordsPerChunk, basis.Length - i));
+            var chunkTokens = basis.Skip(i).Take(Math.Min(wordsPerChunk, basis.Length - i)).ToList();
             yield return string.Join(string.Empty, chunkTokens);
         }
     }
@@ -340,7 +331,7 @@ public sealed class SseStreamHttpContent : HttpContent
         int wordsPerChunk)
     {
         var tokens = reasoning.Split(' ');
-        var useReasoning = reasoning.GetHashCode() % 2 == 0;
+        var useReasoning = true;  // reasoning.GetHashCode() % 2 == 0;
         for (int i = 0; i < tokens.Length; i += wordsPerChunk)
         {
             var chunkTokens = string.Join(' ', tokens.Skip(i).Take(Math.Min(wordsPerChunk, tokens.Length - i)));
@@ -370,7 +361,7 @@ public sealed class SseStreamHttpContent : HttpContent
                             new ChatMessage.ReasoningDetail
                             {
                                 Type = "reasoning.summary",
-                                Summary = reasoning,
+                                Summary = chunkTokens,
                             }
                         ],
                         Content = string.Empty,

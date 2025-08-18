@@ -23,21 +23,18 @@ import {
 } from '../sseEventTypes';
 import type { MessageDto, ReasoningMessageDto } from '$lib/types/chat';
 import { BaseMessageHandler } from '../messageHandlers';
+import ReasoningRenderer from '$lib/components/ReasoningRenderer.svelte';
 
 /**
  * Renderer for reasoning messages
  */
 export class ReasoningMessageRenderer implements MessageRenderer {
 	getStreamingComponent() {
-		// Return Svelte component for streaming reasoning
-	// NOTE: Placeholder renderer; not wired into UI yet. Callers should guard.
-	return null as any; // TODO: Import actual Svelte component when ready
+		return ReasoningRenderer;
 	}
 	
 	getCompleteComponent() {
-		// Return Svelte component for complete reasoning
-	// NOTE: Placeholder renderer; not wired into UI yet. Callers should guard.
-	return null as any; // TODO: Import actual Svelte component when ready
+		return ReasoningRenderer;
 	}
 	
 	getStreamingProps(snapshot: MessageSnapshot): Record<string, any> {

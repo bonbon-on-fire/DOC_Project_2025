@@ -32,29 +32,6 @@
 	$: messageSnapshotIsStreaming = messageSnapshot?.isStreaming;
 	$: messageSnapshotType = messageSnapshot?.messageType;
 
-	/**
-	 * Checks if a message contains math-related tool calls
-	 */
-	function hasMathToolCalls(msg: RichMessageDto): boolean {
-		const toolCalls = [];
-		if ((msg as any).toolCalls) toolCalls.push(...(msg as any).toolCalls);
-		if ((msg as any).tool_calls) toolCalls.push(...(msg as any).tool_calls);
-		if ((msg as any).content && typeof (msg as any).content === 'string') {
-			try {
-				const parsed = JSON.parse((msg as any).content);
-				if (parsed.tool_calls) toolCalls.push(...parsed.tool_calls);
-			} catch {}
-		}
-		
-		return toolCalls.some(tc => 
-			tc.name && (
-				tc.name.toLowerCase().includes('math') ||
-				tc.name.toLowerCase().includes('calc') ||
-				tc.name.toLowerCase().includes('compute') ||
-				tc.name.toLowerCase().includes('evaluate')
-			)
-		);
-	}
 
 	/**
 	 * Attempts to resolve the appropriate renderer for the message type.
@@ -65,23 +42,22 @@
 			renderError = null;
 			fallbackToMessageBubble = false;
 
-			// Log tool call messages for debugging
-			if (message.messageType === 'tool_call' || (message as any).toolCalls) {
-				console.log('[MessageRouter] Resolving renderer for tool call message:', {
-					id: message.id,
-					messageType: message.messageType,
-					toolCalls: (message as any).toolCalls,
-					hasToolCalls: !!(message as any).toolCalls,
-					toolCallsCount: (message as any).toolCalls?.length || 0
-				});
-			}
-
-			// Determine the effective message type with better debugging
-			let effectiveMessageType = message.messageType || 'text';
+			// Determine the effective message type
+			const effectiveMessageType = message.messageType || 'text';
 			
-			// Special handling for tool calls - check if they're math-related
-			if (effectiveMessageType === 'tool_call' && hasMathToolCalls(message)) {
-				effectiveMessageType = 'math_tool';
+			// Log routing decision for debugging
+			if (effectiveMessageType === 'tools_aggregate') {
+				console.log('[MessageRouter] Routing tools_aggregate message:', {
+					id: message.id,
+					messageType: effectiveMessageType,
+					toolCallPairs: (message as any).toolCallPairs
+				});
+			} else if (effectiveMessageType === 'tool_call') {
+				console.log('[MessageRouter] Routing tool_call message:', {
+					id: message.id,
+					messageType: effectiveMessageType,
+					toolCalls: (message as any).toolCalls
+				});
 			}
 
 			// Get renderer from registry

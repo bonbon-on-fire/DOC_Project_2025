@@ -111,11 +111,59 @@ export const chatActions = {
 				});
 			}
 			
-			// Ensure message timestamps are properly converted to Date objects
-			chat.messages = chat.messages.map((m) => ({ 
-				...m, 
-				timestamp: new Date(m.timestamp) 
-			}));
+			// Transform messages to ensure proper format
+			chat.messages = chat.messages.map((m: any) => {
+				// Convert timestamp to Date object
+				const message = { 
+					...m, 
+					timestamp: new Date(m.timestamp) 
+				};
+				
+				// Transform tools_aggregate messages to have toolCallPairs
+				if (message.messageType === 'tools_aggregate' && message.toolCalls && message.toolResults) {
+					console.log('[Chat Store] Transforming tools_aggregate message:', {
+						id: message.id,
+						toolCallsCount: message.toolCalls.length,
+						toolResultsCount: message.toolResults?.length || 0
+					});
+					
+					// Create a map of results by tool_call_id
+					const resultsMap = new Map();
+					if (message.toolResults) {
+						for (const result of message.toolResults) {
+							const toolCallId = result.toolCallId || result.tool_call_id;
+							if (toolCallId) {
+								resultsMap.set(toolCallId, result);
+							}
+						}
+					}
+					
+					// Create paired structure
+					message.toolCallPairs = message.toolCalls.map((toolCall: any) => {
+						const toolCallId = toolCall.tool_call_id || toolCall.id || `tool_${toolCall.index}`;
+						const result = resultsMap.get(toolCallId);
+						
+						console.log('[Chat Store] Pairing tool call:', {
+							toolCallId,
+							toolName: toolCall.function_name || toolCall.name,
+							hasResult: !!result
+						});
+						
+						return {
+							toolCall,
+							toolResult: result
+						};
+					});
+					
+					// Keep original arrays for compatibility but mark that we have pairs
+					console.log('[Chat Store] Created toolCallPairs:', {
+						pairsCount: message.toolCallPairs.length,
+						withResults: message.toolCallPairs.filter((p: any) => p.toolResult).length
+					});
+				}
+				
+				return message;
+			});
 			
 			currentChat.set(chat);
 			currentChatId.set(chatId);

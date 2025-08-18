@@ -94,9 +94,22 @@ export interface ToolResultMessageDto extends MessageDto {
 	messageType?: 'tool_result';
 }
 
+// Paired structure for client-side tool call representation
+export interface ToolCallPair {
+	toolCall: ToolCall;
+	toolResult?: ToolCallResult; // Optional until result arrives
+}
+
+// Server sends this format
 export interface ToolsCallAggregateMessageDto extends MessageDto {
 	toolCalls: ToolCall[];
 	toolResults?: ToolCallResult[];
+	messageType?: 'tools_aggregate';
+}
+
+// Client uses this format for rendering
+export interface ClientToolsCallAggregateMessageDto extends MessageDto {
+	toolCallPairs: ToolCallPair[];
 	messageType?: 'tools_aggregate';
 }
 

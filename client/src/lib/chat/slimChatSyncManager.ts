@@ -45,11 +45,15 @@ export class SlimChatSyncManager implements HandlerEventListener {
 
 	/** Map server event id + kind to a stable, UI-unique message id */
 	private toDisplayId(kind: string, messageId: string): string {
+		// For tool-related events, map them all to the same aggregate message ID
+		// This ensures tool_call_update and tool_result go to the same message
+		if (kind === 'tools_call_update' || kind === 'tool_result' || kind === 'tools_aggregate') {
+			return `${messageId}:tools_aggregate`;
+		}
 		// Ensure reasoning/text/tools do not collide if server reuses ids
 		// Include all known message types to prevent ID collisions
 		if (kind === 'text' || kind === 'reasoning' || 
-		    kind === 'tool_call' || kind === 'tool_result' || 
-		    kind === 'tools_call_update' || kind === 'usage') {
+		    kind === 'tool_call' || kind === 'usage') {
 			return `${messageId}:${kind}`;
 		}
 		return messageId;
@@ -130,9 +134,15 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			});
 		}
 		
-		const handler = this.handlerRegistry.getHandler(envelope.kind);
+		// Route tool_call_update and tool_result to the aggregate handler
+		let handlerType = envelope.kind;
+		if (envelope.kind === 'tools_call_update' || envelope.kind === 'tool_result') {
+			handlerType = 'tools_aggregate';
+		}
+		
+		const handler = this.handlerRegistry.getHandler(handlerType);
 		if (!handler) {
-			console.warn(`No handler found for message type: ${envelope.kind}`);
+			console.warn(`No handler found for message type: ${handlerType}`);
 			return;
 		}
 
@@ -164,9 +174,15 @@ export class SlimChatSyncManager implements HandlerEventListener {
 	 * Handle message complete event - route to appropriate message handler
 	 */
 	private handleMessageCompleteEvent(envelope: MessageCompleteEventEnvelope): void {
-		const handler = this.handlerRegistry.getHandler(envelope.kind);
+		// Route tool-related completions to the aggregate handler
+		let handlerType = envelope.kind;
+		if (envelope.kind === 'tools_call' || envelope.kind === 'tool_result' || envelope.kind === 'tools_aggregate') {
+			handlerType = 'tools_aggregate';
+		}
+		
+		const handler = this.handlerRegistry.getHandler(handlerType);
 		if (!handler) {
-			console.warn(`No handler found for message type: ${envelope.kind}`);
+			console.warn(`No handler found for message type: ${handlerType}`);
 			return;
 		}
 
@@ -271,9 +287,9 @@ export class SlimChatSyncManager implements HandlerEventListener {
 		// Include type-specific data from snapshot
 		if (dtoMessageType === 'tool_call' && snapshot.toolCalls) {
 			(messageDto as any).toolCalls = snapshot.toolCalls;
-		} else if (dtoMessageType === 'tools_aggregate' && (snapshot.toolCalls || snapshot.toolResults)) {
-			(messageDto as any).toolCalls = snapshot.toolCalls || [];
-			(messageDto as any).toolResults = snapshot.toolResults || [];
+		} else if (dtoMessageType === 'tools_aggregate' && snapshot.toolCallPairs) {
+			// Use paired structure for aggregate messages
+			(messageDto as any).toolCallPairs = snapshot.toolCallPairs || [];
 		} else if (dtoMessageType === 'text' && snapshot.textDelta) {
 			(messageDto as any).text = snapshot.textDelta;
 		} else if (dtoMessageType === 'reasoning' && snapshot.reasoningDelta) {
@@ -301,17 +317,16 @@ export class SlimChatSyncManager implements HandlerEventListener {
 				this.updateMessageInChat(messageId, updatedDto);
 			}
 		}
-		// For tools aggregate messages, update both tool calls and results
-		else if (snapshot.messageType === 'tools_aggregate' && (snapshot.toolCalls || snapshot.toolResults)) {
+		// For tools aggregate messages, update with paired structure
+		else if (snapshot.messageType === 'tools_aggregate' && snapshot.toolCallPairs) {
 			const currentChat = get(this.currentChatStore);
 			const existingMessage = currentChat?.messages.find(m => m.id === messageId);
 			
 			if (existingMessage && existingMessage.messageType === 'tools_aggregate') {
-				// Update the existing message with current tool calls and results
+				// Update the existing message with paired structure
 				const updatedDto = {
 					...existingMessage,
-					toolCalls: snapshot.toolCalls || [],
-					toolResults: snapshot.toolResults || []
+					toolCallPairs: snapshot.toolCallPairs || []
 				};
 				this.updateMessageInChat(messageId, updatedDto);
 			}

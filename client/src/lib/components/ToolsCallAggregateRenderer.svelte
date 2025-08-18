@@ -1,74 +1,11 @@
 <script lang="ts">
-	import type { ToolsCallAggregateMessageDto, ToolCall, ToolCallResult } from '$lib/types/chat';
-	import { writable } from 'svelte/store';
-	import { onMount } from 'svelte';
+	import type { ClientToolsCallAggregateMessageDto } from '$lib/types/chat';
+	import ToolCallRouter from './ToolCallRouter.svelte';
 	
-	export let message: ToolsCallAggregateMessageDto;
+	export let message: ClientToolsCallAggregateMessageDto;
 	export let isStreaming = false;
-	
-	// Track which results have been received
-	const resultMap = writable(new Map<string, ToolCallResult>());
-	
-	$: {
-		if (message.toolResults) {
-			const map = new Map<string, ToolCallResult>();
-			message.toolResults.forEach(result => {
-				map.set(result.toolCallId, result);
-			});
-			resultMap.set(map);
-		}
-	}
-	
-	function getToolCallId(toolCall: ToolCall): string {
-		return toolCall.tool_call_id || toolCall.id || `tool_${toolCall.index || 0}`;
-	}
-	
-	function formatArgsAsYaml(args: any): Array<{type: string, content: string}> {
-		let parsed = args;
-		if (typeof args === 'string') {
-			try {
-				parsed = JSON.parse(args);
-			} catch {
-				return [{type: 'text', content: args}];
-			}
-		}
-		
-		const lines: Array<{type: string, content: string}> = [];
-		
-		function formatValue(value: any, indent = 0): void {
-			const spaces = '  '.repeat(indent);
-			
-			if (value === null) {
-				lines.push({type: 'null', content: 'null'});
-			} else if (typeof value === 'boolean') {
-				lines.push({type: 'boolean', content: String(value)});
-			} else if (typeof value === 'number') {
-				lines.push({type: 'number', content: String(value)});
-			} else if (typeof value === 'string') {
-				lines.push({type: 'string', content: value});
-			} else if (Array.isArray(value)) {
-				value.forEach((item, i) => {
-					if (i === 0 || typeof item === 'object') {
-						lines.push({type: 'text', content: '\n' + spaces + '- '});
-					} else {
-						lines.push({type: 'text', content: ', '});
-					}
-					formatValue(item, indent + 1);
-				});
-			} else if (typeof value === 'object') {
-				Object.entries(value).forEach(([key, val], i) => {
-					if (i > 0) lines.push({type: 'text', content: '\n'});
-					lines.push({type: 'text', content: spaces});
-					lines.push({type: 'key', content: key + ':'});
-					lines.push({type: 'text', content: ' '});
-					formatValue(val, indent + 1);
-				});
-			}
-		}
-		
-		formatValue(parsed);
-		return lines;
-	}
+	export let renderPhase: 'initial' | 'streaming' | 'complete' = 'initial';
+	export let expanded: boolean = true;
 </script>
 
 <div class="tools-aggregate-container" data-testid="tool-call-renderer">
@@ -80,79 +17,46 @@
 	</div>
 	
 	<div class="tool-calls-list">
-		{#each message.toolCalls as toolCall, index}
-			{@const toolCallId = getToolCallId(toolCall)}
-			{@const result = $resultMap.get(toolCallId)}
-			<div class="tool-call-item" 
-				data-testid="tool-call-item" 
-				data-id={toolCallId}
-				data-tool-name={toolCall.function_name || toolCall.name || 'Unknown Tool'}
-				data-tool-index={index}>
-				<div class="tool-call-header">
-					<span class="tool-name" data-testid="tool-call-name">{toolCall.function_name || toolCall.name || 'Unknown Tool'}</span>
-					{#if result}
-						{#if result.result.startsWith('Error')}
-							<span class="status-badge error">Error</span>
-						{:else}
-							<span class="status-badge success">Complete</span>
-						{/if}
-					{:else if isStreaming}
-						<span class="status-badge pending">Running...</span>
-					{:else}
-						<span class="status-badge waiting">Waiting</span>
-					{/if}
-				</div>
-				
-				{#if toolCall.function_args || toolCall.args}
-					<div class="tool-args" data-testid="tool-call-args">
-						<div class="args-label">Arguments:</div>
-						<pre class="args-content">
-							{#each formatArgsAsYaml(toolCall.function_args || toolCall.args) as segment}
-								{#if segment.type === 'key'}
-									<span class="text-orange-600">{segment.content}</span>
-								{:else if segment.type === 'string'}
-									<span class="text-green-600">{segment.content}</span>
-								{:else if segment.type === 'number'}
-									<span class="text-blue-600">{segment.content}</span>
-								{:else if segment.type === 'boolean'}
-									<span class="text-purple-600">{segment.content}</span>
-								{:else if segment.type === 'null'}
-									<span class="text-gray-600">{segment.content}</span>
-								{:else}
-									<span>{segment.content}</span>
-								{/if}
-							{/each}
-						</pre>
-					</div>
-				{:else}
-					<div class="tool-args" data-testid="tool-call-args">
-						<span>No arguments</span>
-					</div>
-				{/if}
-				
-				{#if result}
-					<div class="tool-result" class:error={result.result.startsWith('Error')}>
-						<div class="result-label">Result:</div>
-						<pre class="result-content">{result.result}</pre>
-					</div>
-				{:else if isStreaming}
-					<div class="tool-pending">
-						<div class="spinner"></div>
-						<span>Executing tool...</span>
-					</div>
-				{/if}
-			</div>
+		{#each message.toolCallPairs || [] as pair, index}
+			<ToolCallRouter
+				toolCallPair={pair}
+				{isStreaming}
+				{renderPhase}
+				{index}
+				{expanded}
+			/>
 		{/each}
+		
+		{#if (!message.toolCallPairs || message.toolCallPairs.length === 0) && isStreaming}
+			<div class="no-tools-message">
+				<div class="spinner"></div>
+				<span>Preparing tool calls...</span>
+			</div>
+		{/if}
 	</div>
 </div>
 
 <style>
 	.tools-aggregate-container {
-		background: var(--color-surface-secondary, #f8f9fa);
-		border: 1px solid var(--color-border, #e0e0e0);
-		border-radius: 8px;
+		background: linear-gradient(135deg, 
+			rgba(17, 24, 39, 0.85), 
+			rgba(11, 15, 25, 0.85));
+		border: 1px solid rgba(59, 130, 246, 0.2);
+		border-radius: 12px;
 		overflow: hidden;
 		margin: 0.5rem 0;
+		backdrop-filter: blur(10px);
+		box-shadow: 
+			0 4px 6px -1px rgba(0, 0, 0, 0.3),
+			0 0 40px rgba(59, 130, 246, 0.05);
+		transition: all 0.3s ease;
+	}
+	
+	.tools-aggregate-container:hover {
+		border-color: rgba(59, 130, 246, 0.3);
+		box-shadow: 
+			0 4px 6px -1px rgba(0, 0, 0, 0.4),
+			0 0 50px rgba(59, 130, 246, 0.08);
 	}
 	
 	.tools-header {
@@ -160,124 +64,54 @@
 		align-items: center;
 		gap: 0.5rem;
 		padding: 0.75rem 1rem;
-		background: var(--color-surface-tertiary, #e8eaf0);
-		border-bottom: 1px solid var(--color-border, #e0e0e0);
+		background: linear-gradient(90deg,
+			rgba(59, 130, 246, 0.1),
+			rgba(99, 102, 241, 0.05));
+		border-bottom: 1px solid rgba(59, 130, 246, 0.15);
 	}
 	
 	.tools-icon {
-		color: var(--color-text-secondary, #666);
+		color: #60a5fa;
 	}
 	
 	.tools-title {
 		font-weight: 500;
-		color: var(--color-text-primary, #333);
+		color: #e2e8f0;
 		font-size: 0.875rem;
 	}
 	
 	.tool-calls-list {
-		padding: 0.75rem;
-	}
-	
-	.tool-call-item {
-		background: white;
-		border: 1px solid var(--color-border-light, #f0f0f0);
-		border-radius: 6px;
-		padding: 0.75rem;
-		margin-bottom: 0.75rem;
-	}
-	
-	.tool-call-item:last-child {
-		margin-bottom: 0;
-	}
-	
-	.tool-call-header {
+		padding: 1rem;
 		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 0.5rem;
+		flex-direction: column;
+		gap: 1rem;
 	}
 	
-	.tool-name {
-		font-weight: 500;
-		color: var(--color-text-primary, #333);
-		font-size: 0.875rem;
-	}
-	
-	.status-badge {
-		padding: 0.125rem 0.5rem;
-		border-radius: 12px;
-		font-size: 0.75rem;
-		font-weight: 500;
-	}
-	
-	.status-badge.success {
-		background: #d4edda;
-		color: #155724;
-	}
-	
-	.status-badge.error {
-		background: #f8d7da;
-		color: #721c24;
-	}
-	
-	.status-badge.pending {
-		background: #fff3cd;
-		color: #856404;
-	}
-	
-	.status-badge.waiting {
-		background: #e2e3e5;
-		color: #383d41;
-	}
-	
-	.tool-args,
-	.tool-result {
-		margin-top: 0.5rem;
-	}
-	
-	.args-label,
-	.result-label {
-		font-size: 0.75rem;
-		color: var(--color-text-secondary, #666);
-		margin-bottom: 0.25rem;
-	}
-	
-	.args-content,
-	.result-content {
-		background: var(--color-surface-code, #f5f5f5);
-		border: 1px solid var(--color-border-light, #e0e0e0);
-		border-radius: 4px;
-		padding: 0.5rem;
-		font-family: 'Monaco', 'Menlo', monospace;
-		font-size: 0.75rem;
-		overflow-x: auto;
+	.tool-calls-list > :global(.tool-call-router) {
 		margin: 0;
-		white-space: pre-wrap;
-		word-break: break-word;
 	}
 	
-	.tool-result.error .result-content {
-		background: #fff5f5;
-		border-color: #ffcccc;
-		color: #cc0000;
-	}
-	
-	.tool-pending {
+	.no-tools-message {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		padding: 0.5rem;
-		background: var(--color-surface-info, #f0f8ff);
-		border-radius: 4px;
+		padding: 0.75rem;
+		background: rgba(59, 130, 246, 0.1);
+		border: 1px solid rgba(59, 130, 246, 0.2);
+		border-radius: 6px;
 		font-size: 0.813rem;
-		color: var(--color-text-secondary, #666);
+		color: #94a3b8;
+	}
+	
+	.no-tools-message {
+		margin-top: 0;
 	}
 	
 	.spinner {
 		width: 14px;
 		height: 14px;
-		border: 2px solid #ddd;
-		border-top-color: #666;
+		border: 2px solid rgba(59, 130, 246, 0.2);
+		border-top-color: #60a5fa;
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
 	}

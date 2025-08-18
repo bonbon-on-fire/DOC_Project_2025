@@ -2,7 +2,8 @@
  * Tools Aggregate Message Handler
  * 
  * Handles messages that combine tool calls with their results.
- * Supports incremental updates of both calls and results.
+ * Maintains a paired structure where each tool call is paired with its result.
+ * Creates aggregate message immediately upon first tool call.
  */
 
 import type { 
@@ -22,7 +23,14 @@ import {
 	StreamChunkPayloadGuards, 
 	MessageCompletePayloadGuards 
 } from '../sseEventTypes';
-import type { MessageDto, ToolCall, ToolCallResult, ToolsCallAggregateMessageDto } from '$lib/types/chat';
+import type { 
+	MessageDto, 
+	ToolCall, 
+	ToolCallResult, 
+	ToolsCallAggregateMessageDto,
+	ClientToolsCallAggregateMessageDto,
+	ToolCallPair 
+} from '$lib/types/chat';
 import { BaseMessageHandler } from '../messageHandlers';
 import ToolsCallAggregateRenderer from '$lib/components/ToolsCallAggregateRenderer.svelte';
 
@@ -31,27 +39,26 @@ import ToolsCallAggregateRenderer from '$lib/components/ToolsCallAggregateRender
  */
 export class ToolsAggregateMessageRenderer implements MessageRenderer {
 	getStreamingComponent() {
-		return ToolsCallAggregateRenderer;
+		return ToolsCallAggregateRenderer as any;
 	}
 	
 	getCompleteComponent() {
-		return ToolsCallAggregateRenderer;
+		return ToolsCallAggregateRenderer as any;
 	}
 	
 	getStreamingProps(snapshot: MessageSnapshot): Record<string, any> {
 		return {
 			message: {
 				...snapshot,
-				toolCalls: snapshot.toolCalls || [],
-				toolResults: snapshot.toolResults || [],
+				toolCallPairs: snapshot.toolCallPairs || [],
 				messageType: 'tools_aggregate'
-			} as ToolsCallAggregateMessageDto,
+			} as ClientToolsCallAggregateMessageDto,
 			isStreaming: snapshot.isStreaming
 		};
 	}
 	
 	getCompleteProps(dto: MessageDto): Record<string, any> {
-		const aggregateDto = dto as ToolsCallAggregateMessageDto;
+		const aggregateDto = dto as ClientToolsCallAggregateMessageDto;
 		return {
 			message: aggregateDto,
 			isStreaming: false
@@ -64,8 +71,8 @@ export class ToolsAggregateMessageRenderer implements MessageRenderer {
  */
 export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 	private renderer = new ToolsAggregateMessageRenderer();
-	private toolCallsMap = new Map<string, Map<string, ToolCall>>();
-	private toolResultsMap = new Map<string, Map<string, ToolCallResult>>();
+	// Map of messageId -> Map of toolCallId -> ToolCallPair
+	private toolCallPairsMap = new Map<string, Map<string, ToolCallPair>>();
 	
 	getMessageType(): string {
 		return 'tools_aggregate';
@@ -94,9 +101,9 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 		
 		let snapshot = this.getSnapshot(messageId);
 		
-		// Create snapshot if it doesn't exist
+		// Create snapshot if it doesn't exist (first tool call creates the aggregate)
 		if (!snapshot) {
-			console.log('[ToolsAggregateMessageHandler] Creating new snapshot for message:', messageId);
+			console.log('[ToolsAggregateMessageHandler] Creating new aggregate message for:', messageId);
 			snapshot = this.initializeMessage(
 				messageId,
 				envelope.chatId,
@@ -104,16 +111,14 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 				envelope.sequenceId
 			);
 			
-			// Initialize empty arrays
+			// Initialize with empty pairs array
 			snapshot = this.updateSnapshot(messageId, {
-				toolCalls: [],
-				toolResults: [],
+				toolCallPairs: [],
 				messageType: 'tools_aggregate'
 			});
 			
-			// Initialize maps for this message
-			this.toolCallsMap.set(messageId, new Map());
-			this.toolResultsMap.set(messageId, new Map());
+			// Initialize map for this message
+			this.toolCallPairsMap.set(messageId, new Map());
 		}
 		
 		// Handle tool call updates
@@ -140,74 +145,97 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 			this.processToolResult(messageId, payload);
 		}
 		
-		// Update snapshot with current state
-		const toolCalls = this.toolCallsMap.get(messageId);
-		const toolResults = this.toolResultsMap.get(messageId);
+		// Update snapshot with current paired state
+		const pairsMap = this.toolCallPairsMap.get(messageId);
+		const toolCallPairs = pairsMap ? Array.from(pairsMap.values()) : [];
 		
 		return this.updateSnapshot(messageId, {
-			toolCalls: toolCalls ? Array.from(toolCalls.values()) : [],
-			toolResults: toolResults ? Array.from(toolResults.values()) : [],
+			toolCallPairs,
 			isStreaming: true
 		});
 	}
 	
 	private processToolCallUpdate(messageId: string, update: ToolCallUpdate) {
-		const toolCallsMap = this.toolCallsMap.get(messageId);
-		if (!toolCallsMap) return;
+		const pairsMap = this.toolCallPairsMap.get(messageId);
+		if (!pairsMap) return;
 		
 		const toolCallId = update.tool_call_id || `${messageId}_tool_${update.index || 0}`;
 		
-		// Get or create tool call
-		let toolCall = toolCallsMap.get(toolCallId) || {
-			id: toolCallId,
-			tool_call_id: toolCallId,
-			index: update.index
-		} as ToolCall;
+		// Get or create pair for this tool call
+		let pair = pairsMap.get(toolCallId);
+		if (!pair) {
+			pair = {
+				toolCall: {
+					id: toolCallId,
+					tool_call_id: toolCallId,
+					index: update.index
+				} as ToolCall,
+				toolResult: undefined
+			};
+			pairsMap.set(toolCallId, pair);
+		}
 		
-		// Update with new data
+		// Update tool call data
 		if (update.function_name) {
-			toolCall.function_name = update.function_name;
-			toolCall.name = update.function_name;
+			pair.toolCall.function_name = update.function_name;
+			pair.toolCall.name = update.function_name;
 		}
 		
 		// Accumulate function arguments
 		if (update.function_args) {
-			const currentArgs = (toolCall.function_args || '') + update.function_args;
-			toolCall.function_args = currentArgs;
+			const currentArgs = (pair.toolCall.function_args || '') + update.function_args;
+			pair.toolCall.function_args = currentArgs;
 			
 			// Try to parse accumulated JSON
 			try {
-				toolCall.args = JSON.parse(currentArgs);
+				pair.toolCall.args = JSON.parse(currentArgs);
 			} catch {
 				// Keep as partial JSON string
-				toolCall.args = { partial: currentArgs };
+				pair.toolCall.args = { partial: currentArgs };
 			}
 		}
 		
-		toolCallsMap.set(toolCallId, toolCall);
-		
-		console.log('[ToolsAggregateMessageHandler] Updated tool call:', {
+		console.log('[ToolsAggregateMessageHandler] Updated tool call in pair:', {
 			toolCallId,
-			name: toolCall.function_name,
-			hasArgs: !!toolCall.args
+			name: pair.toolCall.function_name,
+			hasArgs: !!pair.toolCall.args,
+			hasResult: !!pair.toolResult
 		});
 	}
 	
 	private processToolResult(messageId: string, result: ToolResultStreamChunkPayload) {
-		const toolResultsMap = this.toolResultsMap.get(messageId);
-		if (!toolResultsMap) return;
+		const pairsMap = this.toolCallPairsMap.get(messageId);
+		if (!pairsMap) return;
 		
-		const toolResult: ToolCallResult = {
+		// Find the pair with matching toolCallId
+		let pair = pairsMap.get(result.toolCallId);
+		
+		// If pair doesn't exist yet (shouldn't happen normally), create placeholder
+		if (!pair) {
+			console.warn('[ToolsAggregateMessageHandler] Received result for unknown tool call:', result.toolCallId);
+			pair = {
+				toolCall: {
+					id: result.toolCallId,
+					tool_call_id: result.toolCallId,
+					function_name: 'unknown',
+					name: 'unknown'
+				} as ToolCall,
+				toolResult: undefined
+			};
+			pairsMap.set(result.toolCallId, pair);
+		}
+		
+		// Update the result in the pair
+		pair.toolResult = {
 			toolCallId: result.toolCallId,
 			result: result.result
 		};
 		
-		toolResultsMap.set(result.toolCallId, toolResult);
-		
-		console.log('[ToolsAggregateMessageHandler] Received tool result:', {
+		console.log('[ToolsAggregateMessageHandler] Added result to pair:', {
 			toolCallId: result.toolCallId,
 			isError: result.isError,
-			resultLength: result.result.length
+			resultLength: result.result.length,
+			pairComplete: !!(pair.toolCall && pair.toolResult)
 		});
 	}
 	
@@ -222,60 +250,94 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 		});
 		
 		let snapshot = this.getSnapshot(messageId);
+		let toolCallPairs: ToolCallPair[] = [];
 		
-		// If no snapshot exists, create one from the complete payload
-		// This happens when server sends a complete aggregate message without streaming
-		if (!snapshot) {
-			console.log('[ToolsAggregateMessageHandler] No snapshot found, creating from complete payload');
+		// If we have a snapshot from streaming, use its pairs
+		if (snapshot) {
+			const pairsMap = this.toolCallPairsMap.get(messageId);
+			if (pairsMap) {
+				toolCallPairs = Array.from(pairsMap.values());
+			}
+		}
+		
+		// If server sends a complete aggregate, transform it to paired format
+		if (envelope.kind === 'tools_aggregate' || envelope.kind === 'tools_call') {
+			const payload = envelope.payload as any;
 			
-			// Initialize snapshot
+			if (payload?.toolCalls || payload?.toolResults) {
+				// Transform server's array format to paired format
+				const serverToolCalls = payload.toolCalls || [];
+				const serverToolResults = payload.toolResults || [];
+				
+				// Create a map of results by toolCallId for easy lookup
+				const resultsMap = new Map<string, ToolCallResult>();
+				for (const result of serverToolResults) {
+					// Handle both toolCallId and tool_call_id formats from server
+					const toolCallId = result.toolCallId || result.tool_call_id;
+					if (toolCallId) {
+						resultsMap.set(toolCallId, result);
+					}
+				}
+				
+				// Build pairs from server data
+				const serverPairs: ToolCallPair[] = serverToolCalls.map((toolCall: ToolCall) => {
+					const toolCallId = toolCall.id || toolCall.tool_call_id || `tool_${toolCall.index}`;
+					const result = resultsMap.get(toolCallId);
+					
+					console.log('[ToolsAggregateMessageHandler] Pairing tool call with result:', {
+						toolCallId,
+						toolName: toolCall.function_name || toolCall.name,
+						hasResult: !!result,
+						resultValue: result?.result?.substring(0, 50)
+					});
+					
+					return {
+						toolCall,
+						toolResult: result
+					};
+				});
+				
+				// If we don't have streaming pairs or server has more complete data, use server pairs
+				if (toolCallPairs.length === 0 || serverPairs.length > toolCallPairs.length) {
+					toolCallPairs = serverPairs;
+					console.log('[ToolsAggregateMessageHandler] Using server pairs:', {
+						count: serverPairs.length,
+						withResults: serverPairs.filter(p => p.toolResult).length
+					});
+				}
+			}
+		}
+		
+		// Create or update snapshot with final pairs
+		if (!snapshot) {
 			snapshot = this.initializeMessage(
 				messageId,
 				envelope.chatId,
 				new Date(envelope.ts),
 				envelope.sequenceId
 			);
-			
-			// Extract tool calls and results from payload
-			const payload = envelope.payload as any;
-			const toolCalls = payload?.toolCalls || [];
-			const toolResults = payload?.toolResults || [];
-			
-			// Update snapshot with complete data
-			snapshot = this.updateSnapshot(messageId, {
-				toolCalls,
-				toolResults,
-				messageType: 'tools_aggregate',
-				isStreaming: false,
-				isComplete: true
-			});
-			
-			console.log('[ToolsAggregateMessageHandler] Created snapshot from complete payload:', {
-				toolCallsCount: toolCalls.length,
-				toolResultsCount: toolResults.length
-			});
-		} else {
-			// Mark existing snapshot as complete
-			snapshot = this.updateSnapshot(messageId, {
-				isStreaming: false,
-				isComplete: true
-			});
 		}
+		
+		snapshot = this.updateSnapshot(messageId, {
+			toolCallPairs,
+			messageType: 'tools_aggregate',
+			isStreaming: false,
+			isComplete: true
+		});
 		
 		// Convert to DTO
 		const dto = this.snapshotToDto(snapshot);
 		console.log('[ToolsAggregateMessageHandler] Final DTO:', {
 			id: dto.id,
 			messageType: dto.messageType,
-			toolCallsCount: dto.toolCalls?.length || 0,
-			toolResultsCount: dto.toolResults?.length || 0
+			pairsCount: dto.toolCallPairs?.length || 0,
+			pairsWithResults: dto.toolCallPairs?.filter(p => p.toolResult).length || 0
 		});
 		
 		this.emitEvent('message_completed', messageId, envelope.chatId, dto);
 		
-		// Clean up maps
-		this.toolCallsMap.delete(messageId);
-		this.toolResultsMap.delete(messageId);
+		// Clean up map
+		this.toolCallPairsMap.delete(messageId);
 		
 		return dto;
 	}
@@ -283,7 +345,7 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 	/**
 	 * Convert snapshot to DTO
 	 */
-	protected snapshotToDto(snapshot: MessageSnapshot): ToolsCallAggregateMessageDto {
+	protected snapshotToDto(snapshot: MessageSnapshot): ClientToolsCallAggregateMessageDto {
 		return {
 			id: snapshot.id,
 			chatId: snapshot.chatId,
@@ -291,8 +353,7 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 			timestamp: snapshot.timestamp,
 			sequenceNumber: snapshot.sequenceNumber,
 			messageType: 'tools_aggregate',
-			toolCalls: snapshot.toolCalls || [],
-			toolResults: snapshot.toolResults || []
+			toolCallPairs: snapshot.toolCallPairs || []
 		};
 	}
 }

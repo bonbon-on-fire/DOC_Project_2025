@@ -11,6 +11,21 @@ export {
 	registerRenderer
 } from './RendererRegistry.js';
 
+// Export Tool Renderer Registry and utilities
+export {
+	ToolRendererRegistry,
+	toolRendererRegistry,
+	registerToolRenderer,
+	getToolRenderer,
+	getToolRendererComponent
+} from './ToolRendererRegistry.js';
+
+// Export tool renderer registration functions
+export {
+	registerBuiltInToolRenderers,
+	registerCustomToolRenderers
+} from './registerToolRenderers.js';
+
 // Re-export types for convenience
 export type { MessageRenderer, CustomRenderer } from '../types/index.js';
 
@@ -39,11 +54,6 @@ export function registerBuiltInRenderers(): void {
 		messageType: 'tool_call'
 	};
 
-	// Register MathToolRenderer for math-specific tool calls
-	const mathToolRenderer: MessageRenderer<MessageDto> = {
-		messageType: 'math_tool'
-	};
-
 	// Register ToolResultRenderer for tool result message types
 	const toolResultRenderer: MessageRenderer<MessageDto> = {
 		messageType: 'tool_result'
@@ -57,7 +67,6 @@ export function registerBuiltInRenderers(): void {
 	registerRenderer('text', textRenderer, true);
 	registerRenderer('reasoning', reasoningRenderer, true);
 	registerRenderer('tool_call', toolCallRenderer, true);
-	registerRenderer('math_tool', mathToolRenderer, true);
 	registerRenderer('tool_result', toolResultRenderer, true);
 	registerRenderer('tools_aggregate', toolsAggregateRenderer, true);
 
@@ -79,8 +88,6 @@ export async function getRendererComponent(messageType: string): Promise<any> {
 			return (await import('../components/ReasoningRenderer.svelte')).default;
 		case 'tool_call':
 			return (await import('../components/ToolCallRenderer.svelte')).default;
-		case 'math_tool':
-			return (await import('../components/MathToolRenderer.svelte')).default;
 		case 'tool_result':
 			return (await import('../components/ToolResultRenderer.svelte')).default;
 		case 'tools_aggregate':

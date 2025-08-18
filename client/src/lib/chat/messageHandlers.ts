@@ -53,6 +53,18 @@ export interface MessageSnapshot {
 		argsJson?: string; // For accumulating streamed JSON
 		id?: string;
 	}>;
+	
+	// Tool results for aggregate messages
+	toolResults?: Array<{
+		toolCallId: string;
+		result: string;
+	}>;
+	
+	// Paired structure for aggregate messages
+	toolCallPairs?: Array<{
+		toolCall: any;
+		toolResult?: any;
+	}>;
 }
 
 /**

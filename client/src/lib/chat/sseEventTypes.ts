@@ -83,6 +83,30 @@ export interface ToolCallUpdate {
 	index?: number;
 	function_name?: string;
 	function_args?: string;
+	// Incremental structured updates derived from server-side JsonFragmentUpdateMiddleware
+	json_update_fragments?: JsonFragmentUpdate[];
+}
+
+// JsonFragments: client-side mirror of server fragment updates
+export type JsonFragmentKind =
+	| 'StartObject'
+	| 'EndObject'
+	| 'StartArray'
+	| 'EndArray'
+	| 'StartString'
+	| 'PartialString'
+	| 'CompleteString'
+	| 'Key'
+	| 'CompleteNumber'
+	| 'CompleteBoolean'
+	| 'CompleteNull'
+	| 'JsonComplete';
+
+export interface JsonFragmentUpdate {
+	path: string;
+	kind: JsonFragmentKind;
+	textValue?: string;
+	value?: unknown;
 }
 
 /**

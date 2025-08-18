@@ -183,7 +183,7 @@ public sealed class TestSseMessageHandler : HttpMessageHandler
                             var name = call.TryGetProperty("name", out var nEl) && nEl.ValueKind == JsonValueKind.String ? (nEl.GetString() ?? string.Empty) : string.Empty;
                             var argsObj = call.TryGetProperty("args", out var aEl) ? aEl : default;
                             var argsJson = argsObj.ValueKind != JsonValueKind.Undefined ? argsObj.GetRawText() : "{}";
-                            Logger?.LogTrace("Tool call: {Name}, Args: {Args}", name, argsJson);
+                            Logger?.LogTrace("Tool call parsed: {Name}, Args: {Args}, HasName: {HasName}", name, argsJson, !string.IsNullOrEmpty(name));
                             calls.Add(new InstructionToolCall(name, argsJson));
                         }
                         messages.Add(InstructionMessage.ForToolCalls(calls));
