@@ -29,90 +29,146 @@
 		}
 	};
 	
+	// Cache previous expression to prevent flickering during incremental updates
+	// This maintains the previous state when JsonFragmentRebuilder returns undefined between keys
+	let expression_cache: string | undefined = undefined;
+	let expression_cache_toolCallId: string | undefined = undefined;
+	
+	// Reset cache when tool call changes (new tool call or different ID)
+	$: if (toolCallPair?.toolCall?.tool_call_id || toolCallPair?.toolCall?.id) {
+		// Check if this is a different tool call than what we cached
+		const currentId = toolCallPair.toolCall.tool_call_id || toolCallPair.toolCall.id;
+		if (expression_cache_toolCallId !== currentId) {
+			expression_cache = undefined;
+			expression_cache_toolCallId = currentId;
+		}
+	}
+	
 	// Extract expression from arguments
 	function getExpression(pair: typeof toolCallPair): string {
-		const args = pair.toolCall.function_args || pair.toolCall.args;
-		let parsed = args;
+		// Prefer stitched args object from JUF over raw function_args string
+		const rawArgs = (pair.toolCall as any).args ?? pair.toolCall.function_args;
+		let parsed: any = rawArgs;
 
-		if (!parsed) {
-			return '';
+		if (parsed == null) {
+			// Return cached expression if available, otherwise show loading indicator
+			return expression_cache ?? 'Loading...';
 		}
 		
-		if (typeof args === 'string') {
+		if (typeof rawArgs === 'string') {
 			try {
-				parsed = JSON.parse(args);
+				parsed = JSON.parse(rawArgs);
 			} catch {
-				return args;
+				// If not valid JSON yet, render the raw string (streaming partial)
+				return rawArgs;
 			}
 		}
 		
 		// Common patterns for calculator/math tools
-		if (parsed.expression) return parsed.expression;
-		if (parsed.formula) return parsed.formula;
-		if (parsed.equation) return parsed.equation;
-		if (parsed.query) return parsed.query;
+		if (parsed.expression) {
+			expression_cache = parsed.expression;
+			return parsed.expression;
+		}
+		if (parsed.formula) {
+			expression_cache = parsed.formula;
+			return parsed.formula;
+		}
+		if (parsed.equation) {
+			expression_cache = parsed.equation;
+			return parsed.equation;
+		}
+		if (parsed.query) {
+			expression_cache = parsed.query;
+			return parsed.query;
+		}
 		
 		// Handle operation-based formats
 		if (parsed.operation && parsed.operands) {
 			const ops = Array.isArray(parsed.operands) ? parsed.operands : [parsed.a || parsed.x, parsed.b || parsed.y];
 			const op = parsed.operation.toLowerCase();
+			let expr: string;
 			
 			switch(op) {
 				case 'add':
 				case 'addition':
 				case '+':
-					return ops.join(' + ');
+					expr = ops.join(' + ');
+					break;
 				case 'subtract':
 				case 'subtraction':
 				case '-':
-					return ops.join(' - ');
+					expr = ops.join(' - ');
+					break;
 				case 'multiply':
 				case 'multiplication':
 				case '*':
 				case '×':
-					return ops.join(' × ');
+					expr = ops.join(' × ');
+					break;
 				case 'divide':
 				case 'division':
 				case '/':
 				case '÷':
-					return ops.join(' ÷ ');
+					expr = ops.join(' ÷ ');
+					break;
 				case 'power':
 				case 'pow':
 				case '^':
-					return `${ops[0]}^${ops[1]}`;
+					expr = `${ops[0]}^${ops[1]}`;
+					break;
 				case 'sqrt':
 				case 'square_root':
-					return `√${ops[0]}`;
+					expr = `√${ops[0]}`;
+					break;
 				case 'mod':
 				case 'modulo':
 				case '%':
-					return `${ops[0]} mod ${ops[1]}`;
+					expr = `${ops[0]} mod ${ops[1]}`;
+					break;
 				default:
-					return `${op}(${ops.join(', ')})`;
+					expr = `${op}(${ops.join(', ')})`;
 			}
+			
+			expression_cache = expr;
+			return expr;
 		}
 		
 		// Handle simple two-operand format
 		if (parsed.a !== undefined && parsed.b !== undefined) {
+			let expr: string;
 			if (parsed.operator) {
-				return `${parsed.a} ${parsed.operator} ${parsed.b}`;
+				expr = `${parsed.a} ${parsed.operator} ${parsed.b}`;
+			} else {
+				// Try to infer operation from tool name
+				const toolName = (pair.toolCall.function_name || pair.toolCall.name || '').toLowerCase();
+				if (toolName.includes('add')) expr = `${parsed.a} + ${parsed.b}`;
+				else if (toolName.includes('subtract')) expr = `${parsed.a} - ${parsed.b}`;
+				else if (toolName.includes('multiply')) expr = `${parsed.a} × ${parsed.b}`;
+				else if (toolName.includes('divide')) expr = `${parsed.a} ÷ ${parsed.b}`;
+				else expr = `${parsed.a}, ${parsed.b}`;
 			}
-			// Try to infer operation from tool name
-			const toolName = (pair.toolCall.function_name || pair.toolCall.name || '').toLowerCase();
-			if (toolName.includes('add')) return `${parsed.a} + ${parsed.b}`;
-			if (toolName.includes('subtract')) return `${parsed.a} - ${parsed.b}`;
-			if (toolName.includes('multiply')) return `${parsed.a} × ${parsed.b}`;
-			if (toolName.includes('divide')) return `${parsed.a} ÷ ${parsed.b}`;
-			return `${parsed.a}, ${parsed.b}`;
+			expression_cache = expr;
+			return expr;
 		}
 		
 		// Handle single value
 		if (parsed.value !== undefined) {
-			return String(parsed.value);
+			const expr = String(parsed.value);
+			expression_cache = expr;
+			return expr;
 		}
 		
-		// Fallback to JSON representation
-		return JSON.stringify(parsed);
+		// Fallback to JSON representation for unknown shapes
+		let result: string;
+		try {
+			result = JSON.stringify(parsed);
+		} catch {
+			result = String(parsed);
+		}
+		
+		// Cache the successfully computed expression
+		expression_cache = result;
+		return result;
 	}
 	
 	// Format the result value

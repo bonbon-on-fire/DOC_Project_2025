@@ -18,7 +18,9 @@ export class JsonFragmentRebuilder {
     }
     
     for (const u of updates) {
-      switch (u.kind as JsonFragmentKind) {
+      // Normalize kind to handle both camelCase and PascalCase from server
+      const normalizedKind = u.kind.charAt(0).toUpperCase() + u.kind.slice(1);
+      switch (normalizedKind as JsonFragmentKind) {
         case 'StartObject': {
           this.ensureContainer(u.path, 'object');
           break;
@@ -105,6 +107,28 @@ export class JsonFragmentRebuilder {
   }
 
   getValue(): any {
+    // Don't return empty containers during construction
+    // Only return the value if we have actual data or if construction is complete
+    if (this.root === undefined) {
+      return undefined;
+    }
+    
+    // If root is an object, check if it has any properties
+    if (typeof this.root === 'object' && this.root !== null && !Array.isArray(this.root)) {
+      if (Object.keys(this.root).length === 0 && !this.complete && !this.locked) {
+        // Empty object during construction - return undefined to indicate "not ready"
+        return undefined;
+      }
+    }
+    
+    // If root is an array, check if it has any elements
+    if (Array.isArray(this.root)) {
+      if (this.root.length === 0 && !this.complete && !this.locked) {
+        // Empty array during construction - return undefined to indicate "not ready"
+        return undefined;
+      }
+    }
+    
     return this.root;
   }
 

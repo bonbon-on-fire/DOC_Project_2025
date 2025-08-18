@@ -173,6 +173,7 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 		}
 
 		// Apply JsonFragments if present using the manager
+		// Note: We only process if there are actual fragments to avoid unnecessary updates
 		if (update.json_update_fragments && update.json_update_fragments.length > 0) {
 			// Generate document ID for this tool call
 			const docId = `${messageId}:${toolCallId}`;
@@ -180,8 +181,15 @@ export class ToolsAggregateMessageHandler extends BaseMessageHandler {
 			// Apply fragments via manager and get current value
 			const args = this.fragmentManager.apply(docId, update.json_update_fragments);
 			
-			// Use snapshot to ensure Svelte reactivity
-			pair.toolCall.args = snapshot(args);
+			// Only update args if we got a value (including empty object {})
+			// undefined means the rebuilder hasn't started yet
+			if (args !== undefined) {
+				// Use snapshot to ensure Svelte reactivity
+				pair.toolCall.args = snapshot(args);
+			}
+		} else if (update.json_update_fragments && update.json_update_fragments.length === 0) {
+			// Empty fragments array - this happens between keys
+			// Don't update args to avoid flickering
 		}
 		
 		// Update tool call data

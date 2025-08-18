@@ -50,8 +50,8 @@
 		
 		// Normalize the tool calls to the expected format
 		return rawToolCalls.map(tc => {
-			// Parse function_args if it's a JSON string
-			let args = tc.args || tc.function_args;
+			// Prefer args (from JUF stitching) over function_args string
+			let args = tc.args ?? tc.function_args;
 			if (typeof args === 'string') {
 				try {
 					args = JSON.parse(args);

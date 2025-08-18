@@ -43,14 +43,38 @@
 			    pair.toolResult.result.includes('failed'));
 	}
 	
+	// Cache previous formatted lines to prevent flickering during incremental updates
+	// This maintains the previous state when JsonFragmentRebuilder returns undefined between keys
+	let lines_back: Array<{type: string, content: string}> | undefined = undefined;
+	let lines_back_toolCallId: string | undefined = undefined;
+	
+	// Reset cache when tool call changes (new tool call or different ID)
+	$: if (toolCallPair?.toolCall?.tool_call_id || toolCallPair?.toolCall?.id) {
+		// Check if this is a different tool call than what we cached
+		const currentId = toolCallPair.toolCall.tool_call_id || toolCallPair.toolCall.id;
+		if (lines_back_toolCallId !== currentId) {
+			lines_back = undefined;
+			lines_back_toolCallId = currentId;
+		}
+	}
+	
 	// Format arguments as YAML-like structure with syntax highlighting
 	function formatArgsAsYaml(args: any): Array<{type: string, content: string}> {
+		// Handle null/undefined - show loading indicator
+		if (args === null || args === undefined) {
+			return lines_back ?? [{type: 'text', content: 'Loading...'}];
+		}
+		
+		// This function should only be called with valid objects or parsed JSON
+		// The component logic above ensures we don't pass partial JSON here
 		let parsed = args;
 		if (typeof args === 'string') {
 			try {
 				parsed = JSON.parse(args);
-			} catch {
-				return [{type: 'text', content: args}];
+			} catch (e) {
+				// This shouldn't happen with our new logic, but as a safety net
+				// show empty object rather than broken JSON
+				return [{type: 'text', content: '{}'}];
 			}
 		}
 		
@@ -78,7 +102,8 @@
 				}
 			} else if (Array.isArray(value)) {
 				if (value.length === 0) {
-					lines.push({type: 'text', content: '[]'});
+					// Don't show empty arrays during streaming, show ... instead
+					lines.push({type: 'text', content: '...'});
 				} else {
 					value.forEach((item, i) => {
 						lines.push({type: 'text', content: (i === 0 ? '' : '\n' + spaces) + '- '});
@@ -88,9 +113,29 @@
 			} else if (typeof value === 'object') {
 				const entries = Object.entries(value);
 				if (entries.length === 0) {
-					lines.push({type: 'text', content: '{}'});
+					// For truly empty root object, show {}
+					if (indent === 0) {
+						lines.push({type: 'text', content: '{}'});
+					} else {
+						// For nested empty objects during streaming, show ... to indicate pending
+						lines.push({type: 'text', content: '...'});
+					}
 				} else {
-					entries.forEach(([key, val], i) => {
+					// Filter out empty nested objects during streaming (unless it's the only entry)
+					// Only filter at nested levels, not at root
+					const filteredEntries = indent > 0 ? entries.filter(([key, val]) => {
+						if (typeof val === 'object' && 
+						    val !== null && 
+						    !Array.isArray(val) && 
+						    Object.keys(val).length === 0 &&
+						    entries.length > 1) {
+							// Skip this empty nested object
+							return false;
+						}
+						return true;
+					}) : entries;
+					
+					filteredEntries.forEach(([key, val], i) => {
 						if (i > 0) lines.push({type: 'text', content: '\n' + spaces});
 						lines.push({type: 'key', content: key + ':'});
 						lines.push({type: 'text', content: ' '});
@@ -103,6 +148,7 @@
 		}
 		
 		formatValue(parsed);
+		lines_back = lines;
 		return lines;
 	}
 	
@@ -196,11 +242,47 @@
 	</div>
 	
 	<!-- Tool arguments -->
-	{#if toolCallPair.toolCall.function_args || toolCallPair.toolCall.args}
+	{#if toolCallPair.toolCall.args !== undefined || toolCallPair.toolCall.function_args}
+		{@const argsToFormat = (() => {
+			// IMPORTANT: Argument precedence for incremental rendering
+			// 1. Always prefer JUF-built args object if it exists (incremental updates)
+			// 2. Only use function_args if it's complete JSON and no JUF args exist
+			// 3. Show empty object {} only when starting (no args at all)
+			// This ensures smooth incremental rendering without flickering.
+			
+			// Always prefer JUF-built args object if it exists and is an object
+			// This includes empty objects {} which is fine - they show as {}
+			if (toolCallPair.toolCall.args !== null && 
+			    toolCallPair.toolCall.args !== undefined && 
+			    typeof toolCallPair.toolCall.args === 'object') {
+				return toolCallPair.toolCall.args;
+			}
+			
+			// Fall back to parsing function_args only if it's valid complete JSON
+			// This prevents showing partial JSON or empty objects during streaming
+			// Only use function_args if args is truly undefined (not set yet)
+			if (toolCallPair.toolCall.function_args && toolCallPair.toolCall.args === undefined) {
+				const str = toolCallPair.toolCall.function_args.trim();
+				// Only try to parse if it looks complete
+				if (str.startsWith('{') && str.endsWith('}')) {
+					try {
+						const parsed = JSON.parse(str);
+						// Only return if we successfully parsed
+						return parsed;
+					} catch {
+						// Invalid JSON, fall through
+					}
+				}
+			}
+			
+			// If we have neither valid JUF args nor parseable function_args,
+			// don't show anything yet - wait for actual data
+			return null;
+		})()}
 		<div class="tool-args" data-testid="tool-call-args">
 			<div class="args-label">Arguments:</div>
 			<pre class="args-content"><!--
-				-->{#each formatArgsAsYaml(toolCallPair.toolCall.function_args || toolCallPair.toolCall.args) as segment}<!--
+				-->{#each formatArgsAsYaml(argsToFormat) as segment}<!--
 					-->{#if segment.type === 'key'}<!--
 						--><span class="text-orange-600 dark:text-orange-400">{segment.content}</span><!--
 					-->{:else if segment.type === 'string'}<!--

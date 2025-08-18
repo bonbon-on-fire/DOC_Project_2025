@@ -19,6 +19,32 @@
 			toggleExpanded();
 		}
 	}
+	
+	// Calculate tool call summary for collapsed view
+	function getToolCallSummary(pairs: typeof message.toolCallPairs) {
+		if (!pairs || pairs.length === 0) return '';
+		
+		// Count occurrences of each tool
+		const toolCounts = new Map<string, number>();
+		for (const pair of pairs) {
+			const toolName = pair.toolCall.function_name || pair.toolCall.name || 'unknown';
+			toolCounts.set(toolName, (toolCounts.get(toolName) || 0) + 1);
+		}
+		
+		// Format as "tool1, tool2(3), tool3" etc
+		const summaryParts: string[] = [];
+		for (const [name, count] of toolCounts) {
+			if (count === 1) {
+				summaryParts.push(name);
+			} else {
+				summaryParts.push(`${name}(${count})`);
+			}
+		}
+		
+		return summaryParts.join(', ');
+	}
+	
+	$: toolSummary = getToolCallSummary(message.toolCallPairs);
 </script>
 
 <div class="tools-aggregate-container" data-testid="tool-call-renderer">
@@ -28,6 +54,9 @@
 				<path fill="currentColor" d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/>
 			</svg>
 			<span class="tools-title">Tool Calls</span>
+			{#if !expanded && toolSummary}
+				<span class="tools-summary">: {toolSummary}</span>
+			{/if}
 		</div>
 		<button
 			class="toggle-button"
@@ -124,6 +153,14 @@
 		font-weight: 500;
 		color: #e2e8f0;
 		font-size: 0.875rem;
+	}
+	
+	.tools-summary {
+		color: #94a3b8;
+		font-weight: 400;
+		font-size: 0.813rem;
+		margin-left: 0.25rem;
+		opacity: 0.9;
 	}
 	
 	.toggle-button {
