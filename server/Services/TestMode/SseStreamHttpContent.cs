@@ -54,6 +54,12 @@ public sealed class InstructionToolCall
 
 public sealed class SseStreamHttpContent : HttpContent
 {
+    // Configuration constants with clear intent
+    private const int DefaultWordsPerChunk = 5;
+    private const int DefaultChunkDelayMs = 100;
+    private const int MinWordsPerChunk = 1;
+    private const int MinChunkDelayMs = 0;
+    
     private static readonly JsonSerializerOptions _jsonSerializerOptionsWithReasoning = OpenClient.S_jsonSerializerOptions;
 
     private readonly string _userMessage;
@@ -73,8 +79,8 @@ public sealed class SseStreamHttpContent : HttpContent
         _userMessage = userMessage;
         _model = model;
         _reasoningFirst = reasoningFirst;
-        _wordsPerChunk = Math.Max(1, wordsPerChunk);
-        _chunkDelayMs = Math.Max(0, chunkDelayMs);
+        _wordsPerChunk = Math.Max(MinWordsPerChunk, wordsPerChunk);
+        _chunkDelayMs = Math.Max(MinChunkDelayMs, chunkDelayMs);
         _instructionPlan = null;
 
         Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
@@ -89,8 +95,8 @@ public sealed class SseStreamHttpContent : HttpContent
         _userMessage = string.Empty;
         _model = model;
         _reasoningFirst = false;
-        _wordsPerChunk = Math.Max(1, wordsPerChunk);
-        _chunkDelayMs = Math.Max(0, chunkDelayMs);
+        _wordsPerChunk = Math.Max(MinWordsPerChunk, wordsPerChunk);
+        _chunkDelayMs = Math.Max(MinChunkDelayMs, chunkDelayMs);
         _instructionPlan = instructionPlan;
 
         Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
@@ -109,21 +115,31 @@ public sealed class SseStreamHttpContent : HttpContent
     protected override Stream CreateContentReadStream(CancellationToken cancellationToken)
     {
         var pipe = new Pipe();
+        var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger<SseStreamHttpContent>();
 
         _ = Task.Run(async () =>
         {
+            Exception? error = null;
             try
             {
                 using var writerStream = pipe.Writer.AsStream(leaveOpen: false);
                 await SerializeCoreAsync(writerStream, cancellationToken).ConfigureAwait(false);
             }
-            catch
+            catch (OperationCanceledException)
             {
-                // Swallow exceptions to avoid crashing background task; reader will observe stream end or failure.
+                // Expected when cancellation is requested
+                logger.LogDebug("Stream creation cancelled");
+            }
+            catch (Exception ex)
+            {
+                // Log the exception but don't rethrow to avoid crashing background task
+                logger.LogError(ex, "Error during SSE stream creation");
+                error = ex;
             }
             finally
             {
-                await pipe.Writer.CompleteAsync().ConfigureAwait(false);
+                // Complete the pipe writer, optionally with error information
+                await pipe.Writer.CompleteAsync(error).ConfigureAwait(false);
             }
         }, CancellationToken.None);
 
@@ -237,6 +253,13 @@ public sealed class SseStreamHttpContent : HttpContent
     private IEnumerable<Choice> SerializeInstructionPlanAsync(InstructionPlan plan)
     {
         var choices = Enumerable.Empty<Choice>();
+        
+        // First, emit the id_message if present
+        if (!string.IsNullOrEmpty(plan.IdMessage))
+        {
+            choices = choices.Concat(ChunkTextMessage(0, plan.IdMessage, _wordsPerChunk));
+        }
+        
         for (int msgIndex = 0; msgIndex < plan.Messages.Count; msgIndex++)
         {
             var message = plan.Messages[msgIndex];

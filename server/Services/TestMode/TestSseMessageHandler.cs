@@ -4,28 +4,71 @@ using System.Text.Json;
 
 namespace AIChat.Server.Services.TestMode;
 
+/// <summary>
+/// HTTP message handler for test mode that simulates SSE streaming responses.
+/// Processes instruction chains and generates mock LLM responses for testing.
+/// </summary>
 public sealed class TestSseMessageHandler : HttpMessageHandler
 {
-    private static readonly ILogger? Logger = null; // Disable logging to avoid null issues
+    // Default configuration values with clear intent
+    private const int DefaultWordsPerChunk = 10; // Number of words to send per SSE chunk
+    private const int DefaultChunkDelayMs = 500; // Delay between chunks to simulate streaming
     
-    public int WordsPerChunk { get; set; } = 10;
-    public int ChunkDelayMs { get; set; } = 500;
+    private readonly ILogger<TestSseMessageHandler> _logger;
+    private readonly IInstructionChainParser _chainParser;
+    private readonly IConversationAnalyzer _conversationAnalyzer;
+    
+    public int WordsPerChunk { get; set; } = DefaultWordsPerChunk;
+    public int ChunkDelayMs { get; set; } = DefaultChunkDelayMs;
+    
+    /// <summary>
+    /// Initializes a new instance for test mode with default services.
+    /// Used for backward compatibility when DI is not available.
+    /// </summary>
+    public TestSseMessageHandler() : this(
+        LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger<TestSseMessageHandler>(),
+        null,
+        null)
+    {
+    }
+    
+    /// <summary>
+    /// Initializes a new instance with dependency injection.
+    /// </summary>
+    public TestSseMessageHandler(
+        ILogger<TestSseMessageHandler> logger,
+        IInstructionChainParser? chainParser = null,
+        IConversationAnalyzer? conversationAnalyzer = null)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        
+        // Use provided services or create defaults
+        _chainParser = chainParser ?? new InstructionChainParser(
+            LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger<InstructionChainParser>());
+            
+        _conversationAnalyzer = conversationAnalyzer ?? new ConversationAnalyzer(
+            LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger<ConversationAnalyzer>(),
+            _chainParser);
+    }
 
+    /// <summary>
+    /// Processes HTTP requests to simulate LLM chat completions with SSE streaming.
+    /// </summary>
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        Logger?.LogTrace("SendAsync called - Method: {Method}, URI: {Uri}", request.Method, request.RequestUri);
+        _logger.LogTrace("SendAsync called - Method: {Method}, URI: {Uri}", request.Method, request.RequestUri);
         if (request.Method != HttpMethod.Post || request.RequestUri == null)
         {
-            Logger?.LogTrace("Not POST or no URI, returning 404");
+            _logger.LogTrace("Not POST or no URI, returning 404");
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
 
         if (!request.RequestUri.AbsolutePath.EndsWith("/v1/chat/completions", StringComparison.OrdinalIgnoreCase))
         {
-            Logger?.LogTrace("Path doesn't match /v1/chat/completions: {Path}", request.RequestUri.AbsolutePath);
+            _logger.LogTrace("Path doesn't match /v1/chat/completions: {Path}", request.RequestUri.AbsolutePath);
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
-        Logger?.LogTrace("Processing chat completions request");
+        _logger.LogTrace("Processing chat completions request");
 
         string body = request.Content == null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(body))
@@ -62,28 +105,69 @@ public sealed class TestSseMessageHandler : HttpMessageHandler
                 ? modelProp.GetString()
                 : null;
 
-            // Instruction-driven mode detection
-            var latest = ExtractLatestUserMessage(root) ?? string.Empty;
-            var (plan, fallbackMessage) = TryParseInstructionPlan(latest);
+            // Analyze full conversation for instruction chains
+            var (instruction, responseCount) = _conversationAnalyzer.AnalyzeConversation(root);
 
             HttpContent content;
-            if (plan is not null)
+            if (instruction != null)
             {
+                // Execute the instruction at the calculated index
+                _logger.LogInformation("Executing instruction {Index}: {Id}", 
+                    responseCount + 1, instruction.IdMessage);
+                    
                 content = new SseStreamHttpContent(
-                    instructionPlan: plan,
+                    instructionPlan: instruction,
                     model: model,
                     wordsPerChunk: WordsPerChunk,
                     chunkDelayMs: ChunkDelayMs);
             }
             else
             {
-                bool reasoningFirst = fallbackMessage.Contains("\nReason:", StringComparison.Ordinal);
-                content = new SseStreamHttpContent(
-                    userMessage: fallbackMessage,
-                    model: model,
-                    reasoningFirst: reasoningFirst,
-                    wordsPerChunk: WordsPerChunk,
-                    chunkDelayMs: ChunkDelayMs);
+                // Check if this is chain exhaustion vs no chain found
+                if (responseCount > 0)
+                {
+                    // Chain was found but exhausted - generate completion message
+                    _logger.LogInformation("Chain exhausted after {Count} executions, generating completion message", responseCount);
+                    
+                    var completion = new InstructionPlan(
+                        "completion",
+                        null,
+                        new List<InstructionMessage> { InstructionMessage.ForText(5) } // "Task completed successfully"
+                    );
+                    
+                    content = new SseStreamHttpContent(
+                        instructionPlan: completion,
+                        model: model,
+                        wordsPerChunk: WordsPerChunk,
+                        chunkDelayMs: ChunkDelayMs);
+                }
+                else
+                {
+                    // No chain found - fall back to existing single instruction logic for backward compatibility
+                    var latest = _conversationAnalyzer.ExtractLatestUserMessage(root) ?? string.Empty;
+                    var (plan, fallbackMessage) = TryParseInstructionPlan(latest);
+
+                    if (plan is not null)
+                    {
+                        _logger.LogInformation("Using single instruction mode (backward compatibility)");
+                        content = new SseStreamHttpContent(
+                            instructionPlan: plan,
+                            model: model,
+                            wordsPerChunk: WordsPerChunk,
+                            chunkDelayMs: ChunkDelayMs);
+                    }
+                    else
+                    {
+                        // Generate simple response based on user message
+                        bool reasoningFirst = fallbackMessage.Contains("\nReason:", StringComparison.Ordinal);
+                        content = new SseStreamHttpContent(
+                            userMessage: fallbackMessage,
+                            model: model,
+                            reasoningFirst: reasoningFirst,
+                            wordsPerChunk: WordsPerChunk,
+                            chunkDelayMs: ChunkDelayMs);
+                    }
+                }
             }
 
             var response = new HttpResponseMessage(HttpStatusCode.OK)
@@ -96,114 +180,24 @@ public sealed class TestSseMessageHandler : HttpMessageHandler
         }
     }
 
-    private static string? ExtractLatestUserMessage(JsonElement root)
+
+    /// <summary>
+    /// Attempts to parse an instruction plan from user message for backward compatibility.
+    /// </summary>
+    private (InstructionPlan? plan, string fallback) TryParseInstructionPlan(string userMessage)
     {
-        if (!root.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array)
+        _logger.LogTrace("Parsing user message for single instruction");
+        
+        // Try to extract instruction chain (which may contain a single instruction)
+        var plans = _chainParser.ExtractInstructionChain(userMessage);
+        
+        if (plans != null && plans.Length > 0)
         {
-            return null;
+            // Return the first instruction for backward compatibility
+            return (plans[0], userMessage);
         }
-        string? latest = null;
-        foreach (var el in messages.EnumerateArray())
-        {
-            if (el.ValueKind != JsonValueKind.Object) continue;
-            if (!el.TryGetProperty("role", out var role) || role.ValueKind != JsonValueKind.String) continue;
-            if (!string.Equals(role.GetString(), "user", StringComparison.OrdinalIgnoreCase)) continue;
-
-            if (el.TryGetProperty("content", out var content))
-            {
-                if (content.ValueKind == JsonValueKind.String)
-                {
-                    latest = content.GetString();
-                }
-            }
-        }
-        return latest;
-    }
-
-    private static (InstructionPlan? plan, string fallback) TryParseInstructionPlan(string userMessage)
-    {
-        Logger?.LogTrace("Parsing user message: {UserMessage}", userMessage);
-        const string startTag = "<|instruction_start|>";
-        const string endTag = "<|instruction_end|>";
-        var start = userMessage.IndexOf(startTag, StringComparison.Ordinal);
-        var end = userMessage.IndexOf(endTag, StringComparison.Ordinal);
-        Logger?.LogTrace("Start index: {Start}, End index: {End}", start, end);
-        if (start < 0 || end <= start)
-        {
-            Logger?.LogTrace("Instruction tags not found, using fallback");
-            return (null, userMessage);
-        }
-
-        var jsonSpan = userMessage.Substring(start + startTag.Length, end - (start + startTag.Length)).Trim();
-        Logger?.LogTrace("Extracted JSON: {JsonSpan}", jsonSpan);
-        try
-        {
-            using var doc = JsonDocument.Parse(jsonSpan);
-            var root = doc.RootElement;
-            Logger?.LogTrace("Parsed JSON successfully, ValueKind: {ValueKind}", root.ValueKind);
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                Logger?.LogTrace("Root is not an object, using fallback");
-                return (null, userMessage);
-            }
-
-            var idMessage = root.TryGetProperty("id_message", out var idEl) && idEl.ValueKind == JsonValueKind.String
-                ? idEl.GetString() ?? string.Empty
-                : string.Empty;
-            int? reasoningLen = null;
-            if (root.TryGetProperty("reasoning", out var reasonEl) && reasonEl.ValueKind == JsonValueKind.Object)
-            {
-                if (reasonEl.TryGetProperty("length", out var lenEl) && lenEl.ValueKind == JsonValueKind.Number && lenEl.TryGetInt32(out var len))
-                {
-                    reasoningLen = Math.Max(0, len);
-                }
-            }
-
-            var messages = new List<InstructionMessage>();
-            if (root.TryGetProperty("messages", out var msgsEl) && msgsEl.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var item in msgsEl.EnumerateArray())
-                {
-                    if (item.ValueKind != JsonValueKind.Object) continue;
-                    if (item.TryGetProperty("text_message", out var textEl) && textEl.ValueKind == JsonValueKind.Object)
-                    {
-                        if (textEl.TryGetProperty("length", out var lEl) && lEl.ValueKind == JsonValueKind.Number && lEl.TryGetInt32(out var tlen))
-                        {
-                            messages.Add(InstructionMessage.ForText(Math.Max(0, tlen)));
-                            continue;
-                        }
-                    }
-                    if (item.TryGetProperty("tool_call", out var toolEl) && toolEl.ValueKind == JsonValueKind.Array)
-                    {
-                        Logger?.LogTrace("Found tool_call array");
-                        var calls = new List<InstructionToolCall>();
-                        foreach (var call in toolEl.EnumerateArray())
-                        {
-                            if (call.ValueKind != JsonValueKind.Object) continue;
-                            var name = call.TryGetProperty("name", out var nEl) && nEl.ValueKind == JsonValueKind.String ? (nEl.GetString() ?? string.Empty) : string.Empty;
-                            var argsObj = call.TryGetProperty("args", out var aEl) ? aEl : default;
-                            var argsJson = argsObj.ValueKind != JsonValueKind.Undefined ? argsObj.GetRawText() : "{}";
-                            Logger?.LogTrace("Tool call parsed: {Name}, Args: {Args}, HasName: {HasName}", name, argsJson, !string.IsNullOrEmpty(name));
-                            calls.Add(new InstructionToolCall(name, argsJson));
-                        }
-                        messages.Add(InstructionMessage.ForToolCalls(calls));
-                        Logger?.LogTrace("Added {Count} tool calls to messages", calls.Count);
-                        continue;
-                    }
-                }
-            }
-
-            if (messages.Count == 0)
-            {
-                return (null, userMessage);
-            }
-
-            var plan = new InstructionPlan(idMessage, reasoningLen, messages);
-            return (plan, userMessage);
-        }
-        catch
-        {
-            return (null, userMessage);
-        }
+        
+        _logger.LogTrace("No instruction found, using fallback");
+        return (null, userMessage);
     }
 }
