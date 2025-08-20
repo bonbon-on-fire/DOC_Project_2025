@@ -136,13 +136,15 @@
 
 <style>
 	.pinned-task-tracker {
-		@apply shadow-sm;
+		box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 		position: sticky;
 		top: 0;
 		z-index: 10;
 	}
 
-	.dark .pinned-task-tracker {
-		@apply shadow-lg;
+	:global(.dark) .pinned-task-tracker {
+		box-shadow:
+			0 10px 15px -3px rgb(0 0 0 / 0.1),
+			0 4px 6px -4px rgb(0 0 0 / 0.1);
 	}
 </style>

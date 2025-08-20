@@ -65,7 +65,7 @@
 		return result;
 	}
 
-	$: flatTasks = flattenTasks(tasks);
+	const flatTasks = $derived(flattenTasks(tasks));
 </script>
 
 <div
@@ -110,18 +110,36 @@
 
 <style>
 	.task-list-display {
-		@apply rounded-lg;
+		border-radius: 0.5rem;
 	}
 
 	.task-list-display::-webkit-scrollbar {
-		@apply w-2;
+		width: 0.5rem;
 	}
 
 	.task-list-display::-webkit-scrollbar-track {
-		@apply rounded bg-gray-100 dark:bg-gray-800;
+		border-radius: 0.25rem;
+		background-color: #f3f4f6;
+	}
+
+	:global(.dark) .task-list-display::-webkit-scrollbar-track {
+		background-color: #1f2937;
 	}
 
 	.task-list-display::-webkit-scrollbar-thumb {
-		@apply rounded bg-gray-400 hover:bg-gray-500 dark:bg-gray-600 dark:hover:bg-gray-500;
+		border-radius: 0.25rem;
+		background-color: #9ca3af;
+	}
+
+	.task-list-display::-webkit-scrollbar-thumb:hover {
+		background-color: #6b7280;
+	}
+
+	:global(.dark) .task-list-display::-webkit-scrollbar-thumb {
+		background-color: #4b5563;
+	}
+
+	:global(.dark) .task-list-display::-webkit-scrollbar-thumb:hover {
+		background-color: #6b7280;
 	}
 </style>
