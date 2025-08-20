@@ -19,6 +19,10 @@ Capture what ever you learn in files in scratchpad `scratchpad/{feature-name}/{t
 
 Create Task checklist (`scratchpad/{feature-name}/{task-id}/checklist.md`) to track your progress and make sure you have completed all the tasks. This CHECKLIST should CONTAIN ALL THE TASKS that you'd need to complete with NO EXCEPTION. This list is going to help you keep on TRACK.
 
+You MUST add reminder on top of checklist to update the tasks (check the checklist items) as they complete.
+
+You SHOULD use `ask_human` tool to connect with user in case you have any **doubts** or **confusion** on any task. Continuing with a task without extreme clarity is inviting substandard codebase. A good developer always work with crystal clear clarity.
+
 ## Task
 
 Being senior developer, you are expected to both complete the task but also uphold the coding standards. The coding standards include
@@ -41,7 +45,7 @@ Before you coplete the task, you need to make sure that you have completed the f
 [ ] All code is well documented with comments explaining the purpose and functionality.
 [ ] All new code is covered by UNIT TESTS, and existing tests are not broken.
 [ ] Code is tested locally and passes all tests.
-[ ] NO build WARNINGS in newly written code.
+[ ] You MUST ensure that no build warnings are introduced in newly written code.
 [ ] MOST IMPORTANT, all tests related to the changes PASS. You can't miss this.
 [ ] Make sure the checklist of the task goals are completed.
 
@@ -49,32 +53,32 @@ Before you coplete the task, you need to make sure that you have completed the f
 
 Always be aware of blocking commands. E.g. `vite tests` are blocking. Work to make sure you command execution doesn't block your progress. If you need to run a command that blocks, make sure you have a plan to continue working on other tasks while the command is running.
 
-# Appendix
+## Appendix
 
 ## Debugging / Problem Solving
 
 When ever solving problem, break down the process in multiple steps
 
-### [ ] Step 1:
+### [ ] Step 1
 
 Analyze the problem. Collect any information that's related to the problem. Make a theory on how to address the problem.
 
-### [ ] Step 2:
+### [ ] Step 2
 
 Validate the theory is correct, try to counter it with any evidence you can find. If the theory still stand move to next step or go back to Step 1.
 
-### [ ] Step 3:
+### [ ] Step 3
 
 Design solution around the theory.
 
-### [ ] Step 4:
+### [ ] Step 4
 
 Plan implementation for the design.
 
-### [ ] Step 5:
+### [ ] Step 5
 
 Execute the plan (hopefully multistep plan).
 
-### [ ] Step 6:
+### [ ] Step 6
 
 Validate we've solved the problem, and provide summary of the solution and steps taken.

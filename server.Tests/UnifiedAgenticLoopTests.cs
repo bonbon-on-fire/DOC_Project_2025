@@ -137,7 +137,7 @@ public class UnifiedAgenticLoopTests
     /// Helper method to aggregate UPDATE messages into FINAL messages, then wrap in CompositeMessage if needed.
     /// This simulates what middleware would do in a real agent loop.
     /// </summary>
-    private IMessage AggregateMessages(List<IMessage> replyMessages, string fromAgent = "TestAgent")
+    private IMessage? AggregateMessages(List<IMessage> replyMessages, string fromAgent = "TestAgent")
     {
         // Filter out UsageMessages
         var nonUsageMessages = replyMessages.Where(m => m is not UsageMessage).ToList();
@@ -837,7 +837,7 @@ Get the weather for San Francisco";
         
         var composite = aggregatedMessage as CompositeMessage;
         composite.Should().NotBeNull();
-        composite.FromAgent.Should().Be("TestAgent");
+        composite!.FromAgent.Should().Be("TestAgent");
         composite.Role.Should().Be(Role.Assistant);
         composite.Messages.Should().NotBeEmpty();
         composite.Messages.Count.Should().Be(replyMessages.Count);
@@ -989,7 +989,7 @@ Get the weather for San Francisco";
         step2Aggregated.Should().BeOfType<CompositeMessage>("Step 2 should produce CompositeMessage");
         var step2Composite = step2Aggregated as CompositeMessage;
         step2Composite.Should().NotBeNull();
-        step2Composite.Messages.Should().HaveCountGreaterThan(1, "CompositeMessage should contain multiple messages");
+        step2Composite!.Messages.Should().HaveCountGreaterThan(1, "CompositeMessage should contain multiple messages");
         step2Composite.FromAgent.Should().Be("Step2Agent");
         step2Composite.Role.Should().Be(Role.Assistant);
         
@@ -1024,7 +1024,7 @@ Get the weather for San Francisco";
     /// Note: CompositeMessage is for local tracking only, not for API submission.
     /// </summary>
     [Fact]
-    public async Task TestMode_ShouldValidateCompositeMessageStructure_ForAgentLoop()
+    public void TestMode_ShouldValidateCompositeMessageStructure_ForAgentLoop()
     {
         // Arrange
         var handler = new TestSseMessageHandler(_logger) { ChunkDelayMs = 0, WordsPerChunk = 5 };
@@ -1108,7 +1108,7 @@ Get the weather for San Francisco";
         // Verify the CompositeMessage in history is structured correctly
         var historyComposite = messages[2] as CompositeMessage;
         historyComposite.Should().NotBeNull("Second assistant message should be CompositeMessage");
-        historyComposite.Messages.Should().HaveCount(3, "CompositeMessage should contain 3 inner messages");
+        historyComposite!.Messages.Should().HaveCount(3, "CompositeMessage should contain 3 inner messages");
         historyComposite.Messages[0].Should().BeOfType<ReasoningMessage>();
         historyComposite.Messages[1].Should().BeOfType<TextMessage>();
         historyComposite.Messages[2].Should().BeOfType<ToolsCallMessage>();
@@ -1116,7 +1116,7 @@ Get the weather for San Francisco";
         // Verify tool call in composite
         var toolMessage = historyComposite.Messages[2] as ToolsCallMessage;
         toolMessage.Should().NotBeNull();
-        toolMessage.ToolCalls.Should().HaveCount(1);
+        toolMessage!.ToolCalls.Should().HaveCount(1);
         toolMessage.ToolCalls[0].FunctionName.Should().Be("analyze_data");
         
         _output.WriteLine($"CompositeMessage structure validation successful!");
@@ -1182,7 +1182,7 @@ Get the weather for San Francisco";
         }
         
         // Step 2: Aggregate messages into CompositeMessage if multiple exist
-        IMessage messageToAdd = null;
+        IMessage? messageToAdd = null;
         if (replyMessages.Count > 1)
         {
             messageToAdd = new CompositeMessage
@@ -1215,7 +1215,7 @@ Get the weather for San Francisco";
         
         var composite = messageToAdd as CompositeMessage;
         composite.Should().NotBeNull();
-        composite.FromAgent.Should().Be("AgentLoopDemo");
+        composite!.FromAgent.Should().Be("AgentLoopDemo");
         composite.Role.Should().Be(Role.Assistant);
         composite.Messages.Should().HaveCount(replyMessages.Count);
         
@@ -1516,4 +1516,34 @@ Get the weather for San Francisco";
     }
 
     #endregion
+}
+
+// Helper class for xUnit logging
+public class XunitLogger<T> : ILogger<T>
+{
+    private readonly ITestOutputHelper _output;
+
+    public XunitLogger(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
+    public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        _output.WriteLine($"[{logLevel}] {formatter(state, exception)}");
+        if (exception != null)
+        {
+            _output.WriteLine($"Exception: {exception}");
+        }
+    }
+
+    private class NullScope : IDisposable
+    {
+        public static NullScope Instance { get; } = new NullScope();
+        public void Dispose() { }
+    }
 }
