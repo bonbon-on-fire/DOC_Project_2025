@@ -50,12 +50,12 @@ const createLogger = () => {
 
 // Resolve API base URL similar to ApiClient
 const RESOLVED_API_BASE = (() => {
-    const envBase = (PUBLIC_API_BASE_URL as any) as string | undefined;
-    if (envBase && typeof envBase === 'string' && envBase.length > 0) return envBase;
-    if (typeof window !== 'undefined' && window.location.port === '5173') {
-        return 'http://localhost:5099';
-    }
-    return '';
+	const envBase = PUBLIC_API_BASE_URL as any as string | undefined;
+	if (envBase && typeof envBase === 'string' && envBase.length > 0) return envBase;
+	if (typeof window !== 'undefined' && window.location.port === '5173') {
+		return 'http://localhost:5099';
+	}
+	return '';
 })();
 
 // Function to send logs to server endpoint

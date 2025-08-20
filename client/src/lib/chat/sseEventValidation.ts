@@ -1,6 +1,6 @@
 /**
  * Type Validation Utilities
- * 
+ *
  * This module provides runtime validation utilities to ensure that
  * SSE events received from the server match the expected TypeScript types.
  * This helps catch type mismatches between client and server at runtime.
@@ -132,7 +132,11 @@ export class SSEEventValidator {
 				errors.push('Text stream chunk payload done property must be boolean');
 			}
 
-			if ('visibility' in obj.payload && obj.payload.visibility && typeof obj.payload.visibility !== 'string') {
+			if (
+				'visibility' in obj.payload &&
+				obj.payload.visibility &&
+				typeof obj.payload.visibility !== 'string'
+			) {
 				errors.push('Reasoning stream chunk payload visibility property must be string');
 			}
 		}
@@ -170,11 +174,18 @@ export class SSEEventValidator {
 				errors.push('Reasoning complete payload reasoning property must be string');
 			}
 
-			if ('usage' in obj.payload && (typeof obj.payload.usage !== 'object' || obj.payload.usage === null)) {
+			if (
+				'usage' in obj.payload &&
+				(typeof obj.payload.usage !== 'object' || obj.payload.usage === null)
+			) {
 				errors.push('Usage complete payload usage property must be object');
 			}
 
-			if ('visibility' in obj.payload && obj.payload.visibility && typeof obj.payload.visibility !== 'string') {
+			if (
+				'visibility' in obj.payload &&
+				obj.payload.visibility &&
+				typeof obj.payload.visibility !== 'string'
+			) {
 				errors.push('Complete payload visibility property must be string');
 			}
 		}
@@ -195,7 +206,11 @@ export class SSEEventValidator {
 			errors.push('Stream complete event must have kind "complete"');
 		}
 
-		return { isValid: errors.length === 0, errors: [...baseResult.errors, ...errors], warnings: baseResult.warnings };
+		return {
+			isValid: errors.length === 0,
+			errors: [...baseResult.errors, ...errors],
+			warnings: baseResult.warnings
+		};
 	}
 
 	/**
@@ -261,11 +276,13 @@ export class SSEEventValidator {
 					// This could be either - validate common structure
 					const streamResult = this.validateStreamChunkEventEnvelope(obj);
 					const messageResult = this.validateMessageCompleteEventEnvelope(obj);
-					
+
 					// Return the result with fewer errors
-					return streamResult.errors.length <= messageResult.errors.length ? streamResult : messageResult;
+					return streamResult.errors.length <= messageResult.errors.length
+						? streamResult
+						: messageResult;
 				}
-				
+
 				return {
 					isValid: false,
 					errors: [`Unknown event kind: ${obj.kind}`],
@@ -280,7 +297,7 @@ export class SSEEventValidator {
  */
 export function validateAndLogSSEEvent(obj: any, eventType: string): boolean {
 	const result = SSEEventValidator.validateEventEnvelope(obj);
-	
+
 	if (!result.isValid) {
 		console.error(`Invalid ${eventType} SSE event:`, {
 			event: obj,

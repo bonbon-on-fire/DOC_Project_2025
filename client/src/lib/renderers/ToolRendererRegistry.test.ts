@@ -15,7 +15,7 @@ describe('ToolRendererRegistry', () => {
 				toolNamePattern: 'calculator',
 				priority: 10
 			};
-			
+
 			const id = registry.register('calculator', renderer, null);
 			expect(id).toMatch(/^tool-renderer-\d+$/);
 			expect(registry.hasRenderer('calculator')).toBe(true);
@@ -26,7 +26,7 @@ describe('ToolRendererRegistry', () => {
 				toolNamePattern: ['math', 'calc'],
 				priority: 10
 			};
-			
+
 			registry.register(['math', 'calc'], renderer, null);
 			expect(registry.hasRenderer('math')).toBe(true);
 			expect(registry.hasRenderer('calc')).toBe(true);
@@ -38,7 +38,7 @@ describe('ToolRendererRegistry', () => {
 				toolNamePattern: /^(math|calc)/i,
 				priority: 10
 			};
-			
+
 			registry.register(/^(math|calc)/i, renderer, null);
 			expect(registry.hasRenderer('math_tool')).toBe(true);
 			expect(registry.hasRenderer('calculator')).toBe(true);
@@ -50,7 +50,7 @@ describe('ToolRendererRegistry', () => {
 				toolNamePattern: '*',
 				priority: -100
 			};
-			
+
 			registry.register('*', renderer, null);
 			expect(registry.hasRenderer('anything')).toBe(true);
 			expect(registry.hasRenderer('random_tool')).toBe(true);
@@ -65,10 +65,10 @@ describe('ToolRendererRegistry', () => {
 				toolNamePattern: /calc/,
 				priority: 15
 			};
-			
+
 			registry.register('calculator', lowPriority, 'low');
 			registry.register(/calc/, highPriority, 'high');
-			
+
 			const result = registry.getRenderer('calculator');
 			expect(result?.component).toBe('high');
 		});
@@ -80,10 +80,10 @@ describe('ToolRendererRegistry', () => {
 				toolNamePattern: 'test_tool',
 				priority: 10
 			};
-			
+
 			registry.register('test_tool', renderer, 'component');
 			const result = registry.getRenderer('test_tool');
-			
+
 			expect(result).toBeTruthy();
 			expect(result?.renderer).toBe(renderer);
 			expect(result?.component).toBe('component');
@@ -94,10 +94,10 @@ describe('ToolRendererRegistry', () => {
 				toolNamePattern: '*',
 				priority: -100
 			};
-			
+
 			registry.register('*', defaultRenderer, 'default');
 			const result = registry.getRenderer('unknown_tool');
-			
+
 			expect(result).toBeTruthy();
 			expect(result?.renderer).toBe(defaultRenderer);
 		});
@@ -112,9 +112,9 @@ describe('ToolRendererRegistry', () => {
 				toolNamePattern: 'Calculator',
 				priority: 10
 			};
-			
+
 			registry.register('Calculator', renderer, 'component');
-			
+
 			expect(registry.hasRenderer('calculator')).toBe(true);
 			expect(registry.hasRenderer('CALCULATOR')).toBe(true);
 			expect(registry.hasRenderer('CaLcUlAtOr')).toBe(true);
@@ -127,10 +127,10 @@ describe('ToolRendererRegistry', () => {
 				toolNamePattern: 'test',
 				priority: 10
 			};
-			
+
 			const id = registry.register('test', renderer, null);
 			expect(registry.hasRenderer('test')).toBe(true);
-			
+
 			const removed = registry.unregister(id);
 			expect(removed).toBe(true);
 			expect(registry.hasRenderer('test')).toBe(false);
@@ -141,10 +141,10 @@ describe('ToolRendererRegistry', () => {
 				toolNamePattern: '*',
 				priority: -100
 			};
-			
+
 			const id = registry.register('*', renderer, null);
 			expect(registry.hasRenderer('anything')).toBe(true);
-			
+
 			const removed = registry.unregister(id);
 			expect(removed).toBe(true);
 			expect(registry.hasRenderer('anything')).toBe(false);
@@ -157,9 +157,9 @@ describe('ToolRendererRegistry', () => {
 			registry.register(['tool2', 'tool3'], { toolNamePattern: ['tool2', 'tool3'] }, null);
 			registry.register(/^tool\d+/, { toolNamePattern: /^tool\d+/ }, null);
 			registry.register('*', { toolNamePattern: '*' }, null);
-			
+
 			const list = registry.listRenderers();
-			
+
 			expect(list).toContain('tool1');
 			expect(list).toContain('[tool2, tool3]');
 			expect(list).toContain('/^tool\\d+/');
@@ -172,11 +172,11 @@ describe('ToolRendererRegistry', () => {
 			registry.register('tool1', { toolNamePattern: 'tool1' }, null);
 			registry.register('tool2', { toolNamePattern: 'tool2' }, null);
 			registry.register('*', { toolNamePattern: '*' }, null);
-			
+
 			expect(registry.getRendererCount()).toBe(3);
-			
+
 			registry.clear();
-			
+
 			expect(registry.getRendererCount()).toBe(0);
 			expect(registry.hasRenderer('tool1')).toBe(false);
 			expect(registry.hasRenderer('tool2')).toBe(false);

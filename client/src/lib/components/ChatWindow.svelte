@@ -9,6 +9,7 @@
 	} from '$lib/stores/chat';
 	import MessageList from './MessageList.svelte';
 	import MessageInput from './MessageInput.svelte';
+	import PinnedTaskTracker from './PinnedTaskTracker.svelte';
 
 	let messagesContainer: HTMLElement;
 	let isSending = false;
@@ -79,11 +80,9 @@
 		if (!messagesContainer || !messagesContainer.scrollHeight || isAutoScrolling) return;
 
 		// Check if user is near the bottom (within 200px - more generous threshold)
-		const distanceFromBottom = 
-			messagesContainer.scrollHeight -
-				messagesContainer.scrollTop -
-				messagesContainer.clientHeight;
-		
+		const distanceFromBottom =
+			messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight;
+
 		const isNearBottom = distanceFromBottom < 200;
 
 		// Only update userHasScrolled if user has scrolled significantly away from bottom
@@ -223,8 +222,14 @@
 			<MessageList messages={$currentChatMessages} />
 		</div>
 
-		<!-- Message Input -->
+		<!-- Message Input Area with Task Tracker -->
 		<div class="border-t border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+			<!-- Pinned Task Tracker (above input) -->
+			{#if $currentChatId}
+				<PinnedTaskTracker chatId={$currentChatId} />
+			{/if}
+
+			<!-- Message Input -->
 			<MessageInput
 				on:send={handleSend}
 				disabled={false}

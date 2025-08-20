@@ -308,16 +308,15 @@ describe('ToolsAggregateMessageHandler', () => {
 
 			// Process late fragments - they should be ignored
 			snapshot = handler.processChunk('msg-late', lateFragmentEnvelope);
-			
+
 			// Args should remain unchanged from before the tool result
 			expect(snapshot.toolCallPairs[0].toolCall.args).toEqual({ status: 'initial' });
 			expect(snapshot.toolCallPairs[0].toolCall.args).not.toHaveProperty('extra');
-			
+
 			// Tool result should still be present
 			expect(snapshot.toolCallPairs[0].toolResult).toBeDefined();
 			expect(snapshot.toolCallPairs[0].toolResult!.result).toBe('Data retrieved successfully');
 		});
-
 
 		it('should handle tool result updates', () => {
 			// First create a tool call
@@ -548,7 +547,7 @@ describe('ToolsAggregateMessageHandler', () => {
 	describe('getRenderer', () => {
 		it('should return a renderer with correct components', () => {
 			const renderer = handler.getRenderer();
-			
+
 			expect(renderer).toBeDefined();
 			expect(renderer.getStreamingComponent()).toBeDefined();
 			expect(renderer.getCompleteComponent()).toBeDefined();

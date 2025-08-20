@@ -29,10 +29,7 @@
 	{:else}
 		<!-- Messages -->
 		{#each messages as message, index (message.id)}
-			<MessageRouter
-				{message}
-				isLatest={index === messages.length - 1}
-			/>
+			<MessageRouter {message} isLatest={index === messages.length - 1} />
 		{/each}
 
 		<!-- Trailing streaming indicator when awaiting assistant response -->
@@ -40,21 +37,39 @@
 			<div class="flex justify-start">
 				<div class="flex max-w-xs items-start space-x-3 sm:max-w-md lg:max-w-lg xl:max-w-xl">
 					<!-- AI Avatar -->
-					<div class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-purple-600">
+					<div
+						class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-purple-600"
+					>
 						<svg class="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+							/>
 						</svg>
 					</div>
 
 					<!-- Typing indicator bubble -->
 					<div class="relative order-last">
-						<div class="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+						<div
+							class="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+						>
 							<div class="flex items-center space-x-2 text-gray-500 dark:text-gray-400">
 								<span class="text-sm">AI is typing</span>
 								<div class="flex space-x-1">
-									<div class="h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 0ms"></div>
-									<div class="h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 150ms"></div>
-									<div class="h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 300ms"></div>
+									<div
+										class="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+										style="animation-delay: 0ms"
+									></div>
+									<div
+										class="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+										style="animation-delay: 150ms"
+									></div>
+									<div
+										class="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+										style="animation-delay: 300ms"
+									></div>
 								</div>
 							</div>
 						</div>

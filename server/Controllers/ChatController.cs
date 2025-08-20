@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Lib.AspNetCore.ServerSentEvents;
 using AIChat.Server.Services;
 using AIChat.Server.Extensions;
+using AIChat.Server.Storage;
+using System.Text.Json;
 using ChatDto = AIChat.Server.Services.ChatDto;
 
 namespace AIChat.Server.Controllers;
@@ -13,15 +15,21 @@ public class ChatController : ControllerBase
     private readonly IChatService _chatService;
     private readonly ILogger<ChatController> _logger;
     private readonly IServerSentEventsService _serverSentEventsService;
+    private readonly ITaskStorage _taskStorage;
+    private readonly IChatStorage _chatStorage;
 
     public ChatController(
         IChatService chatService,
         ILogger<ChatController> logger,
-        IServerSentEventsService serverSentEventsService)
+        IServerSentEventsService serverSentEventsService,
+        ITaskStorage taskStorage,
+        IChatStorage chatStorage)
     {
         _chatService = chatService;
         _logger = logger;
         _serverSentEventsService = serverSentEventsService;
+        _taskStorage = taskStorage;
+        _chatStorage = chatStorage;
     }
 
     // GET: api/chat/history?userId={userId}&page={page}&pageSize={pageSize}
@@ -105,6 +113,44 @@ public class ChatController : ControllerBase
 
         return NoContent();
     }
+
+    // GET: api/chat/{chatId}/tasks
+    [HttpGet("{chatId}/tasks")]
+    public async Task<ActionResult<GetTasksResponse>> GetTasks(string chatId)
+    {
+        // Verify chat exists and user has access
+        var chatResult = await _chatStorage.GetChatByIdAsync(chatId);
+        if (!chatResult.Success)
+        {
+            return NotFound(new { Error = "Chat not found" });
+        }
+
+        // TODO: Add proper user authorization check here
+        // For now, we'll skip authorization in development
+
+        var taskState = await _taskStorage.GetTasksAsync(chatId);
+        
+        if (taskState == null)
+        {
+            // Return empty task list if no tasks exist
+            return Ok(new GetTasksResponse
+            {
+                ChatId = chatId,
+                Tasks = JsonDocument.Parse("[]").RootElement,
+                Version = 0
+            });
+        }
+
+        return Ok(new GetTasksResponse
+        {
+            ChatId = taskState.ChatId,
+            Tasks = taskState.Tasks,
+            Version = taskState.Version
+        });
+    }
+
+    // Note: Task updates are handled server-side only through LLM tool calls
+    // The client has read-only access to task state via the GET endpoint above
 
     // POST: api/chat/stream-sse
     [HttpPost("stream-sse")]
@@ -238,4 +284,21 @@ public class ChatHistoryResponse
     public int TotalCount { get; set; }
     public int Page { get; set; }
     public int PageSize { get; set; }
+}
+
+// Task-related DTOs
+public class GetTasksResponse
+{
+    public required string ChatId { get; set; }
+    public required JsonElement Tasks { get; set; }
+    public required int Version { get; set; }
+}
+
+// Note: UpdateTasksRequest and UpdateTasksResponse removed - tasks are only updated server-side via LLM tool calls
+
+public class TaskErrorInfo
+{
+    public required string Code { get; set; }
+    public required string Message { get; set; }
+    public int? CurrentVersion { get; set; }
 }

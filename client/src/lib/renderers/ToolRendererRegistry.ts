@@ -11,7 +11,7 @@ export class ToolRendererRegistry {
 
 	/**
 	 * Registers a renderer for specific tool names.
-	 * 
+	 *
 	 * @param pattern - Pattern to match tool names (string, array, regex, or '*')
 	 * @param renderer - The renderer interface implementation
 	 * @param component - The Svelte component or async loader
@@ -40,7 +40,7 @@ export class ToolRendererRegistry {
 		}
 
 		// Insert in priority order (higher priority first)
-		const insertIndex = this.renderers.findIndex(r => r.priority < priority);
+		const insertIndex = this.renderers.findIndex((r) => r.priority < priority);
 		if (insertIndex === -1) {
 			this.renderers.push(registration);
 		} else {
@@ -52,7 +52,7 @@ export class ToolRendererRegistry {
 
 	/**
 	 * Finds the best matching renderer for a tool name.
-	 * 
+	 *
 	 * @param toolName - The name of the tool to find a renderer for
 	 * @returns The matching renderer registration or default if no match
 	 */
@@ -81,7 +81,7 @@ export class ToolRendererRegistry {
 		}
 
 		if (Array.isArray(pattern)) {
-			return pattern.some(p => toolName.toLowerCase() === p.toLowerCase());
+			return pattern.some((p) => toolName.toLowerCase() === p.toLowerCase());
 		}
 
 		if (pattern instanceof RegExp) {
@@ -93,7 +93,7 @@ export class ToolRendererRegistry {
 
 	/**
 	 * Gets the component for a specific tool renderer.
-	 * 
+	 *
 	 * @param toolName - The tool name to get component for
 	 * @returns Promise that resolves to the Svelte component
 	 */
@@ -113,7 +113,7 @@ export class ToolRendererRegistry {
 
 	/**
 	 * Unregisters a renderer by its ID.
-	 * 
+	 *
 	 * @param id - The registration ID returned from register()
 	 * @returns true if a renderer was removed
 	 */
@@ -125,7 +125,7 @@ export class ToolRendererRegistry {
 		}
 
 		// Remove from regular renderers
-		const index = this.renderers.findIndex(r => r.id === id);
+		const index = this.renderers.findIndex((r) => r.id === id);
 		if (index !== -1) {
 			this.renderers.splice(index, 1);
 			return true;
@@ -136,7 +136,7 @@ export class ToolRendererRegistry {
 
 	/**
 	 * Lists all registered tool patterns.
-	 * 
+	 *
 	 * @returns Array of pattern descriptions
 	 */
 	listRenderers(): string[] {
@@ -161,7 +161,7 @@ export class ToolRendererRegistry {
 
 	/**
 	 * Checks if a renderer is registered for the specified tool name.
-	 * 
+	 *
 	 * @param toolName - The tool name to check
 	 * @returns true if a renderer is registered
 	 */
@@ -171,7 +171,7 @@ export class ToolRendererRegistry {
 
 	/**
 	 * Gets the total number of registered renderers.
-	 * 
+	 *
 	 * @returns The count of registered renderers (including default)
 	 */
 	getRendererCount(): number {
@@ -189,7 +189,7 @@ export class ToolRendererRegistry {
 
 	/**
 	 * Sets or updates the default renderer.
-	 * 
+	 *
 	 * @param renderer - The renderer interface
 	 * @param component - The Svelte component or async loader
 	 */
@@ -203,7 +203,7 @@ export const toolRendererRegistry = new ToolRendererRegistry();
 
 /**
  * Convenience function to register a tool renderer to the global registry.
- * 
+ *
  * @param pattern - Pattern to match tool names
  * @param renderer - The renderer interface
  * @param component - The Svelte component or async loader
@@ -219,7 +219,7 @@ export function registerToolRenderer(
 
 /**
  * Convenience function to get a tool renderer from the global registry.
- * 
+ *
  * @param toolName - The tool name to find a renderer for
  * @returns The renderer registration or null
  */
@@ -229,7 +229,7 @@ export function getToolRenderer(toolName: string): ToolRendererRegistration | nu
 
 /**
  * Convenience function to get a tool renderer component from the global registry.
- * 
+ *
  * @param toolName - The tool name to get component for
  * @returns Promise that resolves to the Svelte component
  */

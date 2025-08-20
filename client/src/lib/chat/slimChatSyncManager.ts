@@ -1,6 +1,6 @@
 /**
  * Slim Chat Synchronization Manager
- * 
+ *
  * A lightweight orchestrator that routes SSE events to appropriate message type handlers.
  * No longer handles message specifics - just coordinates and manages chat-level state.
  */
@@ -8,7 +8,7 @@
 import { writable, get, type Writable } from 'svelte/store';
 import type { ChatDto, MessageDto } from '$lib/types/chat';
 import type { StreamingUIState, InitEvent, ErrorEvent } from './types';
-import type { 
+import type {
 	SSEEventEnvelopeUnion,
 	InitEventEnvelope,
 	StreamChunkEventEnvelope,
@@ -17,18 +17,14 @@ import type {
 	ErrorEventEnvelope
 } from './sseEventTypes';
 import { SSEEventGuards } from './sseEventTypes';
-import type { 
-	MessageHandlerRegistry, 
-	HandlerEvent, 
-	HandlerEventListener 
-} from './messageHandlers';
+import type { MessageHandlerRegistry, HandlerEvent, HandlerEventListener } from './messageHandlers';
 
 /**
  * Slim chat sync manager - just routes events to handlers
  */
 export class SlimChatSyncManager implements HandlerEventListener {
 	private handlerRegistry: MessageHandlerRegistry;
-	
+
 	// Svelte stores for reactive state management
 	private currentChatStore: Writable<ChatDto | null>;
 	private chatsStore: Writable<ChatDto[]>;
@@ -128,8 +124,10 @@ export class SlimChatSyncManager implements HandlerEventListener {
 	 * Handle stream chunk event - route to appropriate message handler
 	 */
 	private handleStreamChunkEvent(envelope: StreamChunkEventEnvelope): void {
-		console.log(`[SlimChatSyncManager] Handling stream chunk: kind=${envelope.kind}, messageId=${envelope.messageId}`);
-		
+		console.log(
+			`[SlimChatSyncManager] Handling stream chunk: kind=${envelope.kind}, messageId=${envelope.messageId}`
+		);
+
 		// Special logging for tool calls
 		if (envelope.kind === 'tools_call_update') {
 			console.log('[SlimChatSyncManager] Tool call chunk received:', {
@@ -138,13 +136,13 @@ export class SlimChatSyncManager implements HandlerEventListener {
 				payloadKeys: Object.keys(envelope.payload || {})
 			});
 		}
-		
+
 		// Route tool_call_update and tool_result to the aggregate handler
 		let handlerType = envelope.kind;
 		if (envelope.kind === 'tools_call_update' || envelope.kind === 'tool_result') {
 			handlerType = 'tools_aggregate';
 		}
-		
+
 		const handler = this.handlerRegistry.getHandler(handlerType);
 		if (!handler) {
 			console.warn(`No handler found for message type: ${handlerType}`);
@@ -156,9 +154,13 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			// handlers use the same sequence across chunks and completion.
 			const displayId = this.toDisplayId(envelope.kind, envelope.messageId);
 			const seq = this.getOrAssignProvisionalSequence(envelope.chatId, displayId);
-			const fixedEnvelope: StreamChunkEventEnvelope = { ...envelope, messageId: displayId, sequenceId: seq } as StreamChunkEventEnvelope;
+			const fixedEnvelope: StreamChunkEventEnvelope = {
+				...envelope,
+				messageId: displayId,
+				sequenceId: seq
+			} as StreamChunkEventEnvelope;
 			const snapshot = handler.processChunk(displayId, fixedEnvelope);
-			
+
 			// Log tool call snapshots
 			if (envelope.kind === 'tools_call_update') {
 				console.log('[SlimChatSyncManager] Tool call snapshot after processing:', {
@@ -167,7 +169,7 @@ export class SlimChatSyncManager implements HandlerEventListener {
 					messageType: snapshot.messageType
 				});
 			}
-			
+
 			// Update streaming UI state based on the updated snapshot
 			this.updateStreamingState(displayId, snapshot.messageType, snapshot);
 		} catch (error) {
@@ -181,10 +183,14 @@ export class SlimChatSyncManager implements HandlerEventListener {
 	private handleMessageCompleteEvent(envelope: MessageCompleteEventEnvelope): void {
 		// Route tool-related completions to the aggregate handler
 		let handlerType = envelope.kind;
-		if (envelope.kind === 'tools_call' || envelope.kind === 'tool_result' || envelope.kind === 'tools_aggregate') {
+		if (
+			envelope.kind === 'tools_call' ||
+			envelope.kind === 'tool_result' ||
+			envelope.kind === 'tools_aggregate'
+		) {
 			handlerType = 'tools_aggregate';
 		}
-		
+
 		const handler = this.handlerRegistry.getHandler(handlerType);
 		if (!handler) {
 			console.warn(`No handler found for message type: ${handlerType}`);
@@ -196,9 +202,12 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			const displayId = this.toDisplayId(envelope.kind, envelope.messageId);
 			this.finalSeqByMessageId.set(displayId, envelope.sequenceId);
 			// Pass through completion envelope so handlers receive the final server sequenceId
-			const fixedEnv: MessageCompleteEventEnvelope = { ...envelope, messageId: displayId } as MessageCompleteEventEnvelope;
+			const fixedEnv: MessageCompleteEventEnvelope = {
+				...envelope,
+				messageId: displayId
+			} as MessageCompleteEventEnvelope;
 			const dto = handler.completeMessage(displayId, fixedEnv);
-			
+
 			// Message completion is handled by the handler event listener
 			// The handler will emit a 'message_completed' event that we'll handle
 		} catch (error) {
@@ -211,15 +220,15 @@ export class SlimChatSyncManager implements HandlerEventListener {
 	 */
 	private handleStreamCompleteEvent(envelope: StreamCompleteEventEnvelope): void {
 		console.log(`Stream completed for chat ${envelope.chatId}`);
-		
+
 		// Finalize any remaining messages that haven't been explicitly completed
 		this.finalizeAllPendingMessages();
 		// Clear sequence caches for next turn
 		this.provisionalSeqByMessageId.clear();
 		this.finalSeqByMessageId.clear();
-		
+
 		// Clear streaming state
-		this.streamingStateStore.update(state => ({
+		this.streamingStateStore.update((state) => ({
 			...state,
 			isStreaming: false,
 			currentMessageId: null,
@@ -271,14 +280,16 @@ export class SlimChatSyncManager implements HandlerEventListener {
 	 * Handle message created by handler
 	 */
 	private onMessageCreated(messageId: string, chatId: string, snapshot: any): void {
-		console.log(`Creating placeholder for message ${messageId} with sequence ${snapshot.sequenceNumber}`);
-		
+		console.log(
+			`Creating placeholder for message ${messageId} with sequence ${snapshot.sequenceNumber}`
+		);
+
 		// Map handler message types to proper DTO message types
 		let dtoMessageType = snapshot.messageType;
 		if (dtoMessageType === 'tools_call_update') {
 			dtoMessageType = 'tool_call';
 		}
-		
+
 		// Create placeholder message DTO and add to chat
 		const messageDto: MessageDto = {
 			id: messageId,
@@ -288,7 +299,7 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			sequenceNumber: snapshot.sequenceNumber,
 			messageType: dtoMessageType
 		} as MessageDto;
-		
+
 		// Include type-specific data from snapshot
 		if (dtoMessageType === 'tool_call' && snapshot.toolCalls) {
 			(messageDto as any).toolCalls = snapshot.toolCalls;
@@ -311,8 +322,8 @@ export class SlimChatSyncManager implements HandlerEventListener {
 		// For tool call messages, update the placeholder with current tool calls
 		if (snapshot.messageType === 'tool_call' && snapshot.toolCalls) {
 			const currentChat = get(this.currentChatStore);
-			const existingMessage = currentChat?.messages.find(m => m.id === messageId);
-			
+			const existingMessage = currentChat?.messages.find((m) => m.id === messageId);
+
 			if (existingMessage && existingMessage.messageType === 'tool_call') {
 				// Update the existing message with current tool calls
 				const updatedDto = {
@@ -325,8 +336,8 @@ export class SlimChatSyncManager implements HandlerEventListener {
 		// For tools aggregate messages, update with paired structure
 		else if (snapshot.messageType === 'tools_aggregate' && snapshot.toolCallPairs) {
 			const currentChat = get(this.currentChatStore);
-			const existingMessage = currentChat?.messages.find(m => m.id === messageId);
-			
+			const existingMessage = currentChat?.messages.find((m) => m.id === messageId);
+
 			if (existingMessage && existingMessage.messageType === 'tools_aggregate') {
 				// Update the existing message with paired structure
 				const updatedDto = {
@@ -342,9 +353,11 @@ export class SlimChatSyncManager implements HandlerEventListener {
 	/**
 	 * Handle message completed by handler
 	 */
-    private onMessageCompleted(messageId: string, chatId: string, dto: MessageDto): void {
-        console.log(`[SlimChatSyncManager] Completing message ${messageId} with sequence ${dto.sequenceNumber}, messageType: ${dto.messageType}`);
-		
+	private onMessageCompleted(messageId: string, chatId: string, dto: MessageDto): void {
+		console.log(
+			`[SlimChatSyncManager] Completing message ${messageId} with sequence ${dto.sequenceNumber}, messageType: ${dto.messageType}`
+		);
+
 		// Log tool call specific data
 		if (dto.messageType === 'tool_call') {
 			console.log('[SlimChatSyncManager] Tool call message completion:', {
@@ -353,28 +366,32 @@ export class SlimChatSyncManager implements HandlerEventListener {
 				toolCallsCount: (dto as any).toolCalls?.length || 0
 			});
 		}
-		
+
 		// Preserve original messageType before any modifications
 		const originalMessageType = dto.messageType;
-		
+
 		// Overwrite with final server-provided sequence number if available
 		const finalSeq = this.finalSeqByMessageId.get(messageId);
 		if (typeof finalSeq === 'number') {
-			console.log(`Overriding sequence ${dto.sequenceNumber} -> ${finalSeq} for message ${messageId}`);
+			console.log(
+				`Overriding sequence ${dto.sequenceNumber} -> ${finalSeq} for message ${messageId}`
+			);
 			(dto as any).sequenceNumber = finalSeq;
 			// Ensure messageType is preserved after sequence override
 			(dto as any).messageType = originalMessageType;
 			this.finalSeqByMessageId.delete(messageId);
 		}
-		
+
 		// Double-check that messageType is still set
 		if (!dto.messageType) {
-			console.warn(`MessageType missing for ${messageId}, attempting to restore from completion envelope`);
+			console.warn(
+				`MessageType missing for ${messageId}, attempting to restore from completion envelope`
+			);
 			// Try to determine messageType from the completion envelope kind
 			// This is a fallback that shouldn't normally be needed
 			(dto as any).messageType = originalMessageType || 'text';
 		}
-		
+
 		console.log(`[SlimChatSyncManager] Final DTO for message ${messageId}:`, {
 			id: dto.id,
 			messageType: dto.messageType,
@@ -382,42 +399,44 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			sequenceNumber: dto.sequenceNumber,
 			hasToolCalls: this.hasToolCalls(dto)
 		});
-		
+
 		// Check if this message already exists in chat (from placeholder creation)
 		const currentChat = get(this.currentChatStore);
-		const existingMessage = currentChat?.messages.find(m => m.id === messageId);
-		
-        if (existingMessage) {
-            console.log(`[SlimChatSyncManager] Replacing existing placeholder for message ${messageId}`, {
-                oldMessageType: existingMessage.messageType,
-                newMessageType: dto.messageType
-            });
-            // Replace the placeholder with the final DTO
-            this.updateMessageInChat(messageId, dto);
-        } else {
-            console.log(`[SlimChatSyncManager] Adding late completion for message ${messageId} (no placeholder found)`);
-            // Add the completed message to chat - this handles late completions
-            // where the message completed after a new message started streaming
-            this.addMessageToChat(dto);
-        }
+		const existingMessage = currentChat?.messages.find((m) => m.id === messageId);
 
-        // Mark snapshot as complete (retain entry for UI phase-based reactions)
-        this.streamingStateStore.update(state => {
-            const next: any = { ...state };
-            if (state.streamingSnapshots && state.streamingSnapshots[messageId]) {
-                next.streamingSnapshots = { ...state.streamingSnapshots };
-                next.streamingSnapshots[messageId] = {
-                    ...next.streamingSnapshots[messageId],
-                    isStreaming: false,
-                    phase: 'complete'
-                };
-            }
-            return next;
-        });
-    }
+		if (existingMessage) {
+			console.log(`[SlimChatSyncManager] Replacing existing placeholder for message ${messageId}`, {
+				oldMessageType: existingMessage.messageType,
+				newMessageType: dto.messageType
+			});
+			// Replace the placeholder with the final DTO
+			this.updateMessageInChat(messageId, dto);
+		} else {
+			console.log(
+				`[SlimChatSyncManager] Adding late completion for message ${messageId} (no placeholder found)`
+			);
+			// Add the completed message to chat - this handles late completions
+			// where the message completed after a new message started streaming
+			this.addMessageToChat(dto);
+		}
+
+		// Mark snapshot as complete (retain entry for UI phase-based reactions)
+		this.streamingStateStore.update((state) => {
+			const next: any = { ...state };
+			if (state.streamingSnapshots && state.streamingSnapshots[messageId]) {
+				next.streamingSnapshots = { ...state.streamingSnapshots };
+				next.streamingSnapshots[messageId] = {
+					...next.streamingSnapshots[messageId],
+					isStreaming: false,
+					phase: 'complete'
+				};
+			}
+			return next;
+		});
+	}
 
 	// ... (keep existing initialization and state management methods)
-	
+
 	/**
 	 * Set current user message for streaming context
 	 */
@@ -454,21 +473,27 @@ export class SlimChatSyncManager implements HandlerEventListener {
 				updatedAt: new Date(event.userTimestamp)
 			};
 			this.currentChatStore.set(newChat);
-			this.chatsStore.update(list => [newChat, ...list.filter(c => c.id !== newChat.id)]);
-			
+			this.chatsStore.update((list) => [newChat, ...list.filter((c) => c.id !== newChat.id)]);
+
 			// Ensure the new chat is selected - update currentChatId store as well
 			this.updateCurrentChatSelection(event.chatId);
 		} else {
 			// For existing chats, check if this user message already exists
-			const already = existing.messages.find(m => m.id === event.userMessageId);
+			const already = existing.messages.find((m) => m.id === event.userMessageId);
 			if (!already) {
 				// Add new user message while preserving all existing messages
-				const updatedMessages = [...existing.messages, userMessageDto].sort((a,b)=>a.sequenceNumber-b.sequenceNumber);
-				this.currentChatStore.update(chat => chat ? {
-					...chat,
-					messages: updatedMessages,
-					updatedAt: new Date()
-				} : chat);
+				const updatedMessages = [...existing.messages, userMessageDto].sort(
+					(a, b) => a.sequenceNumber - b.sequenceNumber
+				);
+				this.currentChatStore.update((chat) =>
+					chat
+						? {
+								...chat,
+								messages: updatedMessages,
+								updatedAt: new Date()
+							}
+						: chat
+				);
 				this.syncCurrentChatToChatsStore();
 			}
 		}
@@ -476,7 +501,7 @@ export class SlimChatSyncManager implements HandlerEventListener {
 		// Set streaming state true at start; DO NOT clear existing snapshots here.
 		// Keeping snapshots allows previously-streamed-but-not-completed messages
 		// (e.g., prior turn's reasoning) to remain visible while new text streams.
-		this.streamingStateStore.update(s => ({
+		this.streamingStateStore.update((s) => ({
 			...s,
 			isStreaming: true,
 			currentMessageId: null,
@@ -489,7 +514,7 @@ export class SlimChatSyncManager implements HandlerEventListener {
 	 */
 	handleError(error: ErrorEvent): void {
 		console.error('SlimChatSyncManager error:', error);
-		this.streamingStateStore.update(state => ({
+		this.streamingStateStore.update((state) => ({
 			...state,
 			isStreaming: false,
 			error: error.message
@@ -510,31 +535,34 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			messageId: messageDto.id,
 			messageType: messageDto.messageType,
 			hasToolCalls: this.hasToolCalls(messageDto),
-			toolCallsCount: (messageDto as any).toolCalls?.length || (messageDto as any).toolCallPairs?.length || 0
+			toolCallsCount:
+				(messageDto as any).toolCalls?.length || (messageDto as any).toolCallPairs?.length || 0
 		});
-		
-		this.currentChatStore.update(chat => {
+
+		this.currentChatStore.update((chat) => {
 			if (!chat) return null;
-			
+
 			// Check if message already exists to avoid duplicates
-			const exists = chat.messages.some(m => m.id === messageDto.id);
+			const exists = chat.messages.some((m) => m.id === messageDto.id);
 			if (exists) {
 				console.log('[SlimChatSyncManager] Message already exists, skipping:', messageDto.id);
 				return chat;
 			}
-			
+
 			const updatedChat = {
 				...chat,
-				messages: [...chat.messages, messageDto].sort((a,b)=>a.sequenceNumber-b.sequenceNumber),
+				messages: [...chat.messages, messageDto].sort(
+					(a, b) => a.sequenceNumber - b.sequenceNumber
+				),
 				updatedAt: new Date()
 			};
-			
+
 			console.log('[SlimChatSyncManager] Added message to chat:', {
 				messageId: messageDto.id,
 				totalMessages: updatedChat.messages.length,
-				messageTypes: updatedChat.messages.map(m => m.messageType)
+				messageTypes: updatedChat.messages.map((m) => m.messageType)
 			});
-			
+
 			return updatedChat;
 		});
 		this.syncCurrentChatToChatsStore();
@@ -547,24 +575,27 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			hasToolCalls: this.hasToolCalls(dto),
 			toolCallsCount: (dto as any).toolCalls?.length || (dto as any).toolCallPairs?.length || 0
 		});
-		
-		this.currentChatStore.update(chat => {
+
+		this.currentChatStore.update((chat) => {
 			if (!chat) return null;
-			
+
 			const updatedChat = {
 				...chat,
-				messages: chat.messages.map(m => m.id === messageId ? dto : m),
+				messages: chat.messages.map((m) => (m.id === messageId ? dto : m)),
 				updatedAt: new Date()
 			};
-			
-			const updatedMessage = updatedChat.messages.find(m => m.id === messageId);
+
+			const updatedMessage = updatedChat.messages.find((m) => m.id === messageId);
 			console.log('[SlimChatSyncManager] Updated message in chat:', {
 				messageId,
 				updatedMessageType: updatedMessage?.messageType,
 				hasToolCalls: updatedMessage ? this.hasToolCalls(updatedMessage) : false,
-				toolCallsCount: (updatedMessage as any)?.toolCalls?.length || (updatedMessage as any)?.toolCallPairs?.length || 0
+				toolCallsCount:
+					(updatedMessage as any)?.toolCalls?.length ||
+					(updatedMessage as any)?.toolCallPairs?.length ||
+					0
 			});
-			
+
 			return updatedChat;
 		});
 		this.syncCurrentChatToChatsStore();
@@ -574,9 +605,9 @@ export class SlimChatSyncManager implements HandlerEventListener {
 	private syncCurrentChatToChatsStore(): void {
 		const current = get(this.currentChatStore);
 		if (!current) return;
-		
-		this.chatsStore.update(chats => {
-			const index = chats.findIndex(c => c.id === current.id);
+
+		this.chatsStore.update((chats) => {
+			const index = chats.findIndex((c) => c.id === current.id);
 			if (index >= 0) {
 				// Update existing chat in the list
 				const updatedChats = [...chats];
@@ -598,40 +629,40 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			snapshotToolCalls: snapshot.toolCalls,
 			snapshotIsStreaming: snapshot.isStreaming
 		});
-		
-        this.streamingStateStore.update(state => {
-            // Always reflect the actively streaming message id so UI ties
-            // streaming state to the correct renderer (reasoning -> text, etc.)
-            const next: any = { ...state, currentMessageId: messageId, isStreaming: true };
-            const prev = state.streamingSnapshots || {};
-            // Mark all existing snapshots as not streaming to avoid cross-talk
-            const cleared: any = {};
-            for (const key in prev) {
-                cleared[key] = { ...prev[key], isStreaming: false };
-            }
-            const existing = cleared[messageId] || { messageType, isStreaming: true, phase: 'initial' };
-            const updated: any = { ...existing, messageType, isStreaming: true, phase: 'streaming' };
-            if (messageType === 'text') {
-                updated.textDelta = snapshot.textDelta || '';
-            } else if (messageType === 'reasoning') {
-                updated.reasoningDelta = snapshot.reasoningDelta || '';
-                updated.visibility = snapshot.visibility ?? existing.visibility ?? null;
-            } else if (messageType === 'tool_call') {
-                updated.toolCalls = snapshot.toolCalls || [];
-                console.log('[SlimChatSyncManager] Storing tool calls in streaming state:', {
-                    messageId,
-                    toolCalls: updated.toolCalls
-                });
-            } else if (messageType === 'tools_aggregate') {
-                updated.toolCallPairs = snapshot.toolCallPairs || [];
-                console.log('[SlimChatSyncManager] Storing tool call pairs in streaming state:', {
-                    messageId,
-                    toolCallPairs: updated.toolCallPairs
-                });
-            }
-            next.streamingSnapshots = { ...cleared, [messageId]: updated };
-            return next;
-        });
+
+		this.streamingStateStore.update((state) => {
+			// Always reflect the actively streaming message id so UI ties
+			// streaming state to the correct renderer (reasoning -> text, etc.)
+			const next: any = { ...state, currentMessageId: messageId, isStreaming: true };
+			const prev = state.streamingSnapshots || {};
+			// Mark all existing snapshots as not streaming to avoid cross-talk
+			const cleared: any = {};
+			for (const key in prev) {
+				cleared[key] = { ...prev[key], isStreaming: false };
+			}
+			const existing = cleared[messageId] || { messageType, isStreaming: true, phase: 'initial' };
+			const updated: any = { ...existing, messageType, isStreaming: true, phase: 'streaming' };
+			if (messageType === 'text') {
+				updated.textDelta = snapshot.textDelta || '';
+			} else if (messageType === 'reasoning') {
+				updated.reasoningDelta = snapshot.reasoningDelta || '';
+				updated.visibility = snapshot.visibility ?? existing.visibility ?? null;
+			} else if (messageType === 'tool_call') {
+				updated.toolCalls = snapshot.toolCalls || [];
+				console.log('[SlimChatSyncManager] Storing tool calls in streaming state:', {
+					messageId,
+					toolCalls: updated.toolCalls
+				});
+			} else if (messageType === 'tools_aggregate') {
+				updated.toolCallPairs = snapshot.toolCallPairs || [];
+				console.log('[SlimChatSyncManager] Storing tool call pairs in streaming state:', {
+					messageId,
+					toolCallPairs: updated.toolCallPairs
+				});
+			}
+			next.streamingSnapshots = { ...cleared, [messageId]: updated };
+			return next;
+		});
 	}
 
 	private finalizeAllPendingMessages(): void {
@@ -640,7 +671,7 @@ export class SlimChatSyncManager implements HandlerEventListener {
 		const handlers = this.handlerRegistry.getAllHandlers();
 		for (const msg of chat.messages) {
 			if (msg.role !== 'assistant') continue;
-			const handler = handlers.find(h => h.canHandle(msg.messageType ?? 'text'));
+			const handler = handlers.find((h) => h.canHandle(msg.messageType ?? 'text'));
 			if (!handler) continue;
 			const dto = handler.finalizeMessage(msg.id);
 			if (dto) {
@@ -653,7 +684,7 @@ export class SlimChatSyncManager implements HandlerEventListener {
 	private getOrAssignProvisionalSequence(chatId: string, messageId: string): number {
 		const existing = this.provisionalSeqByMessageId.get(messageId);
 		if (existing !== undefined) return existing;
-		
+
 		const current = get(this.currentChatStore);
 		if (!current || current.id !== chatId) {
 			// No current chat or different chat - start from 0
@@ -661,13 +692,14 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			this.provisionalSeqByMessageId.set(messageId, seq);
 			return seq;
 		}
-		
+
 		// Calculate next sequence based on current messages + already assigned provisional sequences
 		const baseSeq = current.messages?.length ?? 0;
 		const assignedProvisionalSeqs = Array.from(this.provisionalSeqByMessageId.values());
-		const maxProvisional = assignedProvisionalSeqs.length > 0 ? Math.max(...assignedProvisionalSeqs) : baseSeq - 1;
+		const maxProvisional =
+			assignedProvisionalSeqs.length > 0 ? Math.max(...assignedProvisionalSeqs) : baseSeq - 1;
 		const seq = Math.max(baseSeq, maxProvisional + 1);
-		
+
 		this.provisionalSeqByMessageId.set(messageId, seq);
 		return seq;
 	}

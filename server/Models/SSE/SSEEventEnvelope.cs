@@ -226,3 +226,51 @@ public class ErrorPayload
     [JsonPropertyName("code")]
     public string? Code { get; set; }
 }
+
+/// <summary>
+/// Envelope for task operation events
+/// </summary>
+public class TaskOperationEventEnvelope : SSEEventEnvelope
+{
+    [JsonPropertyName("messageId")]
+    public string? MessageId { get; set; }
+
+    [JsonPropertyName("payload")]
+    public required TaskOperationPayload Payload { get; set; }
+}
+
+/// <summary>
+/// Payload for task operation events
+/// </summary>
+public class TaskOperationPayload
+{
+    [JsonPropertyName("operationType")]
+    public required string OperationType { get; set; } // "start", "complete", "sync"
+
+    [JsonPropertyName("operation")]
+    public TaskOperation? Operation { get; set; }
+
+    [JsonPropertyName("taskState")]
+    public System.Text.Json.JsonElement? TaskState { get; set; }
+
+    [JsonPropertyName("version")]
+    public int? Version { get; set; }
+}
+
+/// <summary>
+/// Represents a task management operation
+/// </summary>
+public class TaskOperation
+{
+    [JsonPropertyName("type")]
+    public required string Type { get; set; } // "add", "update", "delete", "list", "manage_notes"
+
+    [JsonPropertyName("function")]
+    public required string Function { get; set; }
+
+    [JsonPropertyName("arguments")]
+    public System.Text.Json.JsonElement? Arguments { get; set; }
+
+    [JsonPropertyName("result")]
+    public System.Text.Json.JsonElement? Result { get; set; }
+}

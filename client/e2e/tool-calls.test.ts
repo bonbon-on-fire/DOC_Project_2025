@@ -3,10 +3,10 @@ import { test, expect } from '@playwright/test';
 test.describe('Tool Call Testing with Mock LLM', () => {
 	test.beforeEach(async ({ page }) => {
 		// Capture browser console logs
-		page.on('console', msg => {
+		page.on('console', (msg) => {
 			console.log(`[Browser ${msg.type()}]:`, msg.text());
 		});
-		
+
 		await page.goto('http://localhost:5173/chat');
 		await page.waitForLoadState('networkidle');
 		await expect(page.getByPlaceholder('Start a new conversation...')).toBeVisible();
@@ -70,7 +70,7 @@ Get the weather for San Francisco
 			// Check YAML-like argument rendering
 			const argsSection = page.getByTestId('tool-call-args').first();
 			await expect(argsSection).toBeVisible();
-			
+
 			// Verify YAML structure and syntax highlighting
 			const argsHtml = await argsSection.innerHTML();
 			expect(argsHtml).toContain('location:');
@@ -116,18 +116,21 @@ Calculate 2 + 2
 
 			// Wait for streaming to complete
 			await page.waitForTimeout(2000);
-			
+
 			// Note: During streaming, tool calls are rendered as tools_aggregate type
 			// Look for the tool within the aggregate renderer
-			const toolCallItem = page.getByTestId('tool-call-item').filter({ hasText: 'calculate' }).first();
+			const toolCallItem = page
+				.getByTestId('tool-call-item')
+				.filter({ hasText: 'calculate' })
+				.first();
 			await expect(toolCallItem).toBeVisible({ timeout: 15000 });
 			console.log('✅ Calculator tool call found');
-			
+
 			// Verify the calculator tool is rendered
 			// Check that it shows the tool name
 			await expect(toolCallItem.getByTestId('tool-call-name')).toContainText('calculate');
 			console.log('✅ Calculator tool name verified');
-			
+
 			// The tool should be visible (may show Loading or actual args)
 			const argsElement = toolCallItem.getByTestId('tool-call-args');
 			await expect(argsElement).toBeDefined();
@@ -289,7 +292,7 @@ Search for machine learning papers
 			await expect(toolCallRenderer).toBeVisible({ timeout: 15000 });
 
 			const argsSection = page.getByTestId('tool-call-args').first();
-			
+
 			// Verify nested structure in YAML-like format
 			await expect(argsSection).toContainText('query:');
 			await expect(argsSection).toContainText('machine learning');

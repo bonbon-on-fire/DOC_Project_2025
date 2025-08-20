@@ -101,21 +101,31 @@
 							<div class="flex items-center space-x-1 text-gray-500 dark:text-gray-400">
 								<span class="text-sm">AI is thinking</span>
 								<div class="flex space-x-1">
-									<div class="h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 0ms"></div>
-									<div class="h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 150ms"></div>
-									<div class="h-2 w-2 animate-bounce rounded-full bg-gray-400" style="animation-delay: 300ms"></div>
+									<div
+										class="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+										style="animation-delay: 0ms"
+									></div>
+									<div
+										class="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+										style="animation-delay: 150ms"
+									></div>
+									<div
+										class="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+										style="animation-delay: 300ms"
+									></div>
 								</div>
 							</div>
 						{/if}
 
 						<!-- Cursor indicator for streaming -->
-						<span class="ml-1 inline-block align-middle animate-pulse">▋</span>
+						<span class="ml-1 inline-block animate-pulse align-middle">▋</span>
+					{:else if safeContent}
+						{@html safeContent}
 					{:else}
-						{#if safeContent}
-							{@html safeContent}
-						{:else}
-							<span class="italic text-gray-400 dark:text-gray-500 text-[0.8rem]" aria-label="Empty message">No content</span>
-						{/if}
+						<span
+							class="text-[0.8rem] text-gray-400 italic dark:text-gray-500"
+							aria-label="Empty message">No content</span
+						>
 					{/if}
 				</div>
 			</div>

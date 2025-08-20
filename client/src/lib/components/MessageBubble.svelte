@@ -106,7 +106,9 @@
 								{@html formatContent($streamingSnapshots?.[message.id]?.reasoningDelta || '')}
 							</div>
 						{/if}
-						<div data-testid="message-content">{@html formatContent($streamingSnapshots?.[message.id]?.textDelta || '')}</div>
+						<div data-testid="message-content">
+							{@html formatContent($streamingSnapshots?.[message.id]?.textDelta || '')}
+						</div>
 						<span class="animate-pulse">▋</span>
 					{:else}
 						<!-- Debug logging for non-streaming condition -->

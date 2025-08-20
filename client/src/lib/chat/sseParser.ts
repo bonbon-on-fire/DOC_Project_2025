@@ -1,14 +1,14 @@
 /**
  * SSE Parser Implementation
- * 
+ *
  * Handles the low-level parsing of Server-Sent Events according to the SSE specification.
  * Separates protocol concerns from business logic and provides type-safe parsing
  * of server SSE event envelopes.
  */
 
 import type { SSEParser, ServerEventEnvelope } from './events';
-import type { 
-	SSEEventEnvelope, 
+import type {
+	SSEEventEnvelope,
 	SSEEventEnvelopeUnion,
 	InitEventEnvelope,
 	StreamChunkEventEnvelope,
@@ -20,14 +20,14 @@ import type {
 
 /**
  * Implementation of SSEParser for handling raw SSE data
- * 
+ *
  * Single Responsibility: Only responsible for SSE protocol parsing
  * Interface Segregation: Focused on SSE parsing operations only
  */
 export class SSEParserImpl implements SSEParser {
 	/**
 	 * Parse raw SSE data into structured events
-	 * 
+	 *
 	 * Handles the SSE format:
 	 * event: eventType
 	 * data: eventData
@@ -106,7 +106,7 @@ export class SSEParserImpl implements SSEParser {
 						console.warn('Invalid init event: missing payload or userMessageId', { parsed });
 						return null;
 					}
-					
+
 					const initEnvelope: InitEventEnvelope = {
 						...baseEnvelope,
 						kind: 'meta',

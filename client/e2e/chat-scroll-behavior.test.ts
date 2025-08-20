@@ -25,7 +25,7 @@ test.describe('Chat Scroll Behavior Tests', () => {
 		console.log('🔄 Test 1: Starting auto-scroll behavior test');
 
 		// Create a conversation with a tall first message to ensure scrollable content
-		const tallMessage1 = "Some Tall Message " + ('.\n\n'.repeat(70)) + "Just say hi";
+		const tallMessage1 = 'Some Tall Message ' + '.\n\n'.repeat(70) + 'Just say hi';
 
 		console.log('📝 Step 1a: Creating conversation with tall message');
 
@@ -94,7 +94,8 @@ test.describe('Chat Scroll Behavior Tests', () => {
 
 		console.log('✅ Step 1b completed: Verified initial auto-scroll to bottom');
 
-		const tallMessage2 = "Second Tall Message " + ('.\n\n'.repeat(70)) + "Just confirming scroll behavior";
+		const tallMessage2 =
+			'Second Tall Message ' + '.\n\n'.repeat(70) + 'Just confirming scroll behavior';
 		// Send another tall message
 
 		console.log('📝 Step 1c: Sending second tall message');
@@ -161,7 +162,10 @@ test.describe('Chat Scroll Behavior Tests', () => {
 		// Create a conversation with multiple tall messages to ensure scrollable content
 		console.log('📝 Step 2a: Creating conversation with tall content');
 
-		const tallMessage1 = `First Very Tall Message ` + ('.\r\n\r\n'.repeat(30)) + ` End of first message This is the first message`;
+		const tallMessage1 =
+			`First Very Tall Message ` +
+			'.\r\n\r\n'.repeat(30) +
+			` End of first message This is the first message`;
 
 		// Send the tall message
 		const chatInput = page.getByPlaceholder('Start a new conversation...');
@@ -178,7 +182,10 @@ test.describe('Chat Scroll Behavior Tests', () => {
 		});
 
 		// Send another tall message to ensure we have enough content
-		const tallMessage2 = `Second Very Tall Message ` + ('.\r\n\r\n'.repeat(30)) + ` End of second message This is the second message`;
+		const tallMessage2 =
+			`Second Very Tall Message ` +
+			'.\r\n\r\n'.repeat(30) +
+			` End of second message This is the second message`;
 
 		const messageInput = page.getByRole('textbox', { name: 'Type your message...' });
 		await messageInput.fill(tallMessage2);
@@ -329,7 +336,8 @@ test.describe('Chat Scroll Behavior Tests', () => {
 		// Create first conversation with tall content
 		console.log('📝 Step 3a: Creating first conversation');
 
-		const tallMessage1 = `First Conversation Tall Message ` + ('.\n\n'.repeat(30)) + ` First Conversation content`;
+		const tallMessage1 =
+			`First Conversation Tall Message ` + '.\n\n'.repeat(30) + ` First Conversation content`;
 
 		const chatInput = page.getByPlaceholder('Start a new conversation...');
 		await chatInput.fill(tallMessage1);
@@ -349,7 +357,8 @@ test.describe('Chat Scroll Behavior Tests', () => {
 		// Create second conversation
 		console.log('📝 Step 3b: Creating second conversation');
 
-		const tallMessage2 = `Second Conversation Tall Message ` + ('.\n\n'.repeat(30)) + ` Second Conversation content`;
+		const tallMessage2 =
+			`Second Conversation Tall Message ` + '.\n\n'.repeat(30) + ` Second Conversation content`;
 
 		// Use the sidebar input to create new conversation
 		await chatInput.fill(tallMessage2);
@@ -449,7 +458,8 @@ test.describe('Chat Scroll Behavior Tests', () => {
 		console.log('🔄 Test 4: Starting scroll behavior during streaming test');
 
 		// Create conversation with tall message
-		const tallMessage = `Streaming Test Message ` + ('.\n\n'.repeat(30)) + ` This message will test streaming behavior`;
+		const tallMessage =
+			`Streaming Test Message ` + '.\n\n'.repeat(30) + ` This message will test streaming behavior`;
 
 		console.log('📝 Step 4a: Creating conversation for streaming test');
 

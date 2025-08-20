@@ -1,9 +1,9 @@
 /**
  * Legacy Event Types for Backward Compatibility
- * 
+ *
  * This module contains minimal legacy interfaces that may still be needed
  * during the transition to the new handler-based architecture.
- * 
+ *
  * TODO: Remove this file once all components are migrated to the new architecture.
  */
 

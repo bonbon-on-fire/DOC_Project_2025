@@ -229,6 +229,45 @@ You MUST use temporary notebooks created in `scratchpad/` directory keep track o
 
 **Validate Fix**: Validate test fixes. If tests are still broken go back to Step 1 or Step 3 based on if design was incorrect or root cause analysis was incorrect.
 
+## Development Chat Modes
+
+This project includes specialized chat mode instructions in `.github/chatmodes/` for different development workflows. Use these modes for specific tasks:
+
+### 📝 **Specification Writer Mode** (`.github/chatmodes/spec-writer.chatmode.md`)
+**Use for**: Creating new feature specifications and requirements documents
+- Gathering requirements from users through iterative questioning
+- Researching existing solutions and similar features
+- Creating structured specification documents in `docs/features/`
+- Understanding current implementation before proposing changes
+
+### 🏗️ **Spec to Design & Tasks Mode** (`.github/chatmodes/spec-n-design-doc-to-tasks.chatmode.md`)
+**Use for**: Converting requirements into actionable development tasks
+- Creating design documents from specifications
+- Breaking down features into manageable tasks
+- Planning implementation approach and architecture
+- Generating task lists with clear acceptance criteria
+
+### 👨‍💻 **Senior Developer Mode** (`.github/chatmodes/senior-developer.chatmode.md`)
+**Use for**: Implementing features with high code quality standards
+- Working on tasks that have been clearly specified and designed
+- Following SOLID, KISS, and DRY principles
+- Writing unit tests and ensuring code maintainability
+- Performing post-implementation code reviews
+- Creating comprehensive checklists in `scratchpad/{feature-name}/{task-id}/`
+
+### 🔄 **Senior Developer Interactive Mode** (`.github/chatmodes/senior-dev-interactive.chatmode.md`)
+**Use for**: Interactive development with research and refinement
+- Researching codebase patterns before implementation
+- Iterative development with continuous review cycles
+- Maintaining development checklists in `scratchpad/`
+- Following Research → Develop → Review → Cleanup workflow
+
+### Recommended Workflow
+1. **New Feature**: Start with **Spec Writer Mode** to create requirements
+2. **Planning**: Use **Spec to Design & Tasks Mode** to create design docs and task lists
+3. **Implementation**: Use **Senior Developer Mode** for task execution
+4. **Complex Tasks**: Use **Senior Developer Interactive Mode** when extensive research is needed
+
 ## Important Notes
 
 **Scratchpad Use**: You MUST use scratchpad to keep your notes. If scratchpad is not used, you tend to **forget the learnings**.

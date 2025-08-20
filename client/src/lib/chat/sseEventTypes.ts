@@ -1,9 +1,9 @@
 /**
  * Server-Side Event (SSE) Types
- * 
+ *
  * This module contains TypeScript types that exactly match the server's
  * SSE event envelope structures defined in AIChat.Server.Models.SSE.
- * 
+ *
  * These types ensure type safety when parsing SSE events from the server
  * and prevent mismatches between client and server event structures.
  */
@@ -134,7 +134,11 @@ export interface ToolResultStreamChunkPayload extends StreamChunkPayload {
 export interface StreamChunkEventEnvelope extends SSEEventEnvelope {
 	messageId: string;
 	sequenceId: number;
-	payload: TextStreamChunkPayload | ReasoningStreamChunkPayload | ToolCallUpdateStreamChunkPayload | ToolResultStreamChunkPayload;
+	payload:
+		| TextStreamChunkPayload
+		| ReasoningStreamChunkPayload
+		| ToolCallUpdateStreamChunkPayload
+		| ToolResultStreamChunkPayload;
 }
 
 // ============================================================================
@@ -189,7 +193,11 @@ export interface UsageCompletePayload extends MessageCompletePayload {
 export interface MessageCompleteEventEnvelope extends SSEEventEnvelope {
 	messageId: string;
 	sequenceId: number;
-	payload: TextCompletePayload | ReasoningCompletePayload | ToolCallCompletePayload | UsageCompletePayload;
+	payload:
+		| TextCompletePayload
+		| ReasoningCompletePayload
+		| ToolCallCompletePayload
+		| UsageCompletePayload;
 }
 
 // ============================================================================
@@ -203,6 +211,42 @@ export interface MessageCompleteEventEnvelope extends SSEEventEnvelope {
 export interface StreamCompleteEventEnvelope extends SSEEventEnvelope {
 	kind: 'complete';
 	// No additional properties beyond base
+}
+
+// ============================================================================
+// Task Operation Events
+// ============================================================================
+
+/**
+ * Represents a task management operation
+ * Matches: AIChat.Server.Models.SSE.TaskOperation
+ */
+export interface TaskOperation {
+	type: string; // "add", "update", "delete", "list", "manage_notes"
+	function: string;
+	arguments?: any;
+	result?: any;
+}
+
+/**
+ * Payload for task operation events
+ * Matches: AIChat.Server.Models.SSE.TaskOperationPayload
+ */
+export interface TaskOperationPayload {
+	operationType: 'start' | 'complete' | 'sync';
+	operation?: TaskOperation;
+	taskState?: any; // Task state as JSON
+	version?: number;
+}
+
+/**
+ * Envelope for task operation events
+ * Matches: AIChat.Server.Models.SSE.TaskOperationEventEnvelope
+ */
+export interface TaskOperationEventEnvelope extends SSEEventEnvelope {
+	kind: 'task_operation';
+	messageId?: string;
+	payload: TaskOperationPayload;
 }
 
 // ============================================================================
@@ -242,6 +286,7 @@ export type SSEEventEnvelopeUnion =
 	| StreamChunkEventEnvelope
 	| MessageCompleteEventEnvelope
 	| StreamCompleteEventEnvelope
+	| TaskOperationEventEnvelope
 	| ErrorEventEnvelope;
 
 /**
@@ -252,35 +297,52 @@ export namespace SSEEventGuards {
 		return envelope.kind === 'meta' && 'payload' in envelope;
 	}
 
-	export function isStreamChunkEvent(envelope: SSEEventEnvelope): envelope is StreamChunkEventEnvelope {
-		if (!('messageId' in envelope) || !('sequenceId' in envelope) || !('payload' in envelope)) return false;
+	export function isStreamChunkEvent(
+		envelope: SSEEventEnvelope
+	): envelope is StreamChunkEventEnvelope {
+		if (!('messageId' in envelope) || !('sequenceId' in envelope) || !('payload' in envelope))
+			return false;
 		const payload: any = (envelope as any).payload;
 		// Check for different types of streaming chunks:
 		// - Text/reasoning chunks have 'delta' property
 		// - Tool call updates have 'toolCallUpdate' property
-		return typeof payload === 'object' && payload != null && (
+		return (
+			typeof payload === 'object' &&
+			payload != null &&
 			// Text or reasoning chunk
-			('delta' in payload && (
-				'done' in payload || 'visibility' in payload || Object.keys(payload).length === 1 // delta-only
-			)) ||
-			// Tool call update chunk
-			'toolCallUpdate' in payload ||
-			// Tool result chunk
-			'toolCallId' in payload
+			(('delta' in payload &&
+				('done' in payload || 'visibility' in payload || Object.keys(payload).length === 1)) || // delta-only
+				// Tool call update chunk
+				'toolCallUpdate' in payload ||
+				// Tool result chunk
+				'toolCallId' in payload)
 		);
 	}
 
-	export function isMessageCompleteEvent(envelope: SSEEventEnvelope): envelope is MessageCompleteEventEnvelope {
-		if (!('messageId' in envelope) || !('sequenceId' in envelope) || !('payload' in envelope)) return false;
+	export function isMessageCompleteEvent(
+		envelope: SSEEventEnvelope
+	): envelope is MessageCompleteEventEnvelope {
+		if (!('messageId' in envelope) || !('sequenceId' in envelope) || !('payload' in envelope))
+			return false;
 		const payload: any = (envelope as any).payload;
 		// Completion payloads have final fields like text, reasoning, usage, or toolCalls
-		return typeof payload === 'object' && payload != null && (
-			'text' in payload || 'reasoning' in payload || 'usage' in payload || 'toolCalls' in payload
+		return (
+			typeof payload === 'object' &&
+			payload != null &&
+			('text' in payload || 'reasoning' in payload || 'usage' in payload || 'toolCalls' in payload)
 		);
 	}
 
-	export function isStreamCompleteEvent(envelope: SSEEventEnvelope): envelope is StreamCompleteEventEnvelope {
+	export function isStreamCompleteEvent(
+		envelope: SSEEventEnvelope
+	): envelope is StreamCompleteEventEnvelope {
 		return envelope.kind === 'complete';
+	}
+
+	export function isTaskOperationEvent(
+		envelope: SSEEventEnvelope
+	): envelope is TaskOperationEventEnvelope {
+		return envelope.kind === 'task_operation' && 'payload' in envelope;
 	}
 
 	export function isErrorEvent(envelope: SSEEventEnvelope): envelope is ErrorEventEnvelope {
@@ -292,21 +354,29 @@ export namespace SSEEventGuards {
  * Payload type guards for streaming chunks
  */
 export namespace StreamChunkPayloadGuards {
-	export function isTextStreamChunk(payload: StreamChunkPayload): payload is TextStreamChunkPayload {
+	export function isTextStreamChunk(
+		payload: StreamChunkPayload
+	): payload is TextStreamChunkPayload {
 		// Treat as text when it has no reasoning-specific field.
 		// Some backends may omit 'done' on intermediate chunks; default to text.
 		return 'done' in payload || !('visibility' in (payload as any));
 	}
 
-	export function isReasoningStreamChunk(payload: StreamChunkPayload): payload is ReasoningStreamChunkPayload {
+	export function isReasoningStreamChunk(
+		payload: StreamChunkPayload
+	): payload is ReasoningStreamChunkPayload {
 		return 'visibility' in (payload as any);
 	}
 
-	export function isToolCallUpdateStreamChunk(payload: StreamChunkPayload): payload is ToolCallUpdateStreamChunkPayload {
+	export function isToolCallUpdateStreamChunk(
+		payload: StreamChunkPayload
+	): payload is ToolCallUpdateStreamChunkPayload {
 		return 'toolCallUpdate' in (payload as any);
 	}
-	
-	export function isToolResultStreamChunk(payload: StreamChunkPayload): payload is ToolResultStreamChunkPayload {
+
+	export function isToolResultStreamChunk(
+		payload: StreamChunkPayload
+	): payload is ToolResultStreamChunkPayload {
 		return 'toolCallId' in (payload as any) && 'result' in (payload as any);
 	}
 }
@@ -319,15 +389,21 @@ export namespace MessageCompletePayloadGuards {
 		return 'text' in payload;
 	}
 
-	export function isReasoningComplete(payload: MessageCompletePayload): payload is ReasoningCompletePayload {
+	export function isReasoningComplete(
+		payload: MessageCompletePayload
+	): payload is ReasoningCompletePayload {
 		return 'reasoning' in payload;
 	}
 
-	export function isToolCallComplete(payload: MessageCompletePayload): payload is ToolCallCompletePayload {
+	export function isToolCallComplete(
+		payload: MessageCompletePayload
+	): payload is ToolCallCompletePayload {
 		return 'toolCalls' in payload;
 	}
 
-	export function isUsageComplete(payload: MessageCompletePayload): payload is UsageCompletePayload {
+	export function isUsageComplete(
+		payload: MessageCompletePayload
+	): payload is UsageCompletePayload {
 		return 'usage' in payload;
 	}
 }

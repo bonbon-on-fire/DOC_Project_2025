@@ -11,9 +11,9 @@
 	export let expanded: boolean = true;
 	export let renderPhase: 'initial' | 'streaming' | 'complete' = 'initial';
 
-	const dispatch = createEventDispatcher<{ 
-		stateChange: { expanded: boolean }; 
-		toggleExpansion: { expanded: boolean } 
+	const dispatch = createEventDispatcher<{
+		stateChange: { expanded: boolean };
+		toggleExpansion: { expanded: boolean };
 	}>();
 
 	// Component implements MessageRenderer interface
@@ -71,20 +71,20 @@
 	function formatResult(result: any): string {
 		if (result === null) return '<span class="text-gray-500">null</span>';
 		if (result === undefined) return '<span class="text-gray-500">undefined</span>';
-		
+
 		if (typeof result === 'string') {
 			// Simple string - just return as-is with subtle styling
 			return `<span class="text-gray-800 dark:text-gray-200">${result}</span>`;
 		}
-		
+
 		if (typeof result === 'number') {
 			return `<span class="text-blue-600 dark:text-blue-400">${result}</span>`;
 		}
-		
+
 		if (typeof result === 'boolean') {
 			return `<span class="text-purple-600 dark:text-purple-400">${result}</span>`;
 		}
-		
+
 		// For objects/arrays, format as JSON with basic highlighting
 		try {
 			const formatted = JSON.stringify(result, null, 2);
@@ -96,10 +96,11 @@
 
 	// Create collapsed preview
 	function createCollapsedPreview(toolResult: any): string {
-		const resultText = typeof toolResult.result === 'string' 
-			? toolResult.result.substring(0, 50) + (toolResult.result.length > 50 ? '...' : '')
-			: 'Result data';
-		
+		const resultText =
+			typeof toolResult.result === 'string'
+				? toolResult.result.substring(0, 50) + (toolResult.result.length > 50 ? '...' : '')
+				: 'Result data';
+
 		const status = toolResult.success ? '✓' : '✗';
 		return `${status} ${toolResult.toolName}: ${resultText}`;
 	}
@@ -119,100 +120,132 @@
 
 <!-- Tool result message using reusable collapsible renderer -->
 <div data-component="tool-result-renderer" data-testid="tool-result-renderer">
-<CollapsibleMessageRenderer
-	{message}
-	{isLatest}
-	{expanded}
-	collapsible={true}
-	iconPath={toolResult.success 
-		? "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-		: "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"}
-	iconColors={toolResult.success 
-		? "from-green-500 to-emerald-600" 
-		: "from-red-500 to-rose-600"}
-	messageType="Tool Result"
-	{collapsedPreview}
-	borderColor={toolResult.success ? "border-green-200" : "border-red-200"}
-	bgColor={toolResult.success ? "bg-green-50" : "bg-red-50"}
-	textColor={toolResult.success ? "text-green-900" : "text-red-900"}
-	darkBorderColor={toolResult.success ? "dark:border-green-700" : "dark:border-red-700"}
-	darkBgColor={toolResult.success ? "dark:bg-green-900/20" : "dark:bg-red-900/20"}
-	darkTextColor={toolResult.success ? "dark:text-green-100" : "dark:text-red-100"}
-	on:stateChange={forwardStateChange}
-	on:toggleExpansion={forwardToggle}
->
-	<!-- Tool result content -->
-	<div class="space-y-3">
-		<div 
-			class="rounded-lg border p-4 {toolResult.success 
-				? 'border-green-300 bg-white dark:border-green-600 dark:bg-green-800/30' 
-				: 'border-red-300 bg-white dark:border-red-600 dark:bg-red-800/30'}"
-			data-testid="tool-result-item"
-			data-tool-name={toolResult.toolName}
-			data-success={toolResult.success}
-		>
-			<!-- Tool result header -->
-			<div class="mb-3 flex items-center justify-between">
-				<div class="flex items-center space-x-2">
-					<svg class="h-5 w-5 {toolResult.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}" 
-						 fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						{#if toolResult.success}
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-								  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-						{:else}
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-								  d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-						{/if}
-					</svg>
-					<span class="font-semibold {toolResult.success ? 'text-green-800 dark:text-green-200' : 'text-red-800 dark:text-red-200'}" 
-						  data-testid="tool-result-name">
-						{toolResult.toolName}
-					</span>
-					{#if toolResult.toolId}
-						<span class="text-xs {toolResult.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}" 
-							  data-testid="tool-result-id">
-							#{toolResult.toolId}
+	<CollapsibleMessageRenderer
+		{message}
+		{isLatest}
+		{expanded}
+		collapsible={true}
+		iconPath={toolResult.success
+			? 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
+			: 'M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z'}
+		iconColors={toolResult.success ? 'from-green-500 to-emerald-600' : 'from-red-500 to-rose-600'}
+		messageType="Tool Result"
+		{collapsedPreview}
+		borderColor={toolResult.success ? 'border-green-200' : 'border-red-200'}
+		bgColor={toolResult.success ? 'bg-green-50' : 'bg-red-50'}
+		textColor={toolResult.success ? 'text-green-900' : 'text-red-900'}
+		darkBorderColor={toolResult.success ? 'dark:border-green-700' : 'dark:border-red-700'}
+		darkBgColor={toolResult.success ? 'dark:bg-green-900/20' : 'dark:bg-red-900/20'}
+		darkTextColor={toolResult.success ? 'dark:text-green-100' : 'dark:text-red-100'}
+		on:stateChange={forwardStateChange}
+		on:toggleExpansion={forwardToggle}
+	>
+		<!-- Tool result content -->
+		<div class="space-y-3">
+			<div
+				class="rounded-lg border p-4 {toolResult.success
+					? 'border-green-300 bg-white dark:border-green-600 dark:bg-green-800/30'
+					: 'border-red-300 bg-white dark:border-red-600 dark:bg-red-800/30'}"
+				data-testid="tool-result-item"
+				data-tool-name={toolResult.toolName}
+				data-success={toolResult.success}
+			>
+				<!-- Tool result header -->
+				<div class="mb-3 flex items-center justify-between">
+					<div class="flex items-center space-x-2">
+						<svg
+							class="h-5 w-5 {toolResult.success
+								? 'text-green-600 dark:text-green-400'
+								: 'text-red-600 dark:text-red-400'}"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							{#if toolResult.success}
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+								></path>
+							{:else}
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+								></path>
+							{/if}
+						</svg>
+						<span
+							class="font-semibold {toolResult.success
+								? 'text-green-800 dark:text-green-200'
+								: 'text-red-800 dark:text-red-200'}"
+							data-testid="tool-result-name"
+						>
+							{toolResult.toolName}
 						</span>
-					{/if}
-				</div>
-				<div class="flex items-center space-x-2">
-					<span class="text-xs {toolResult.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}">
-						{toolResult.success ? 'Success' : 'Error'}
-					</span>
-				</div>
-			</div>
-
-			<!-- Error message if failed -->
-			{#if !toolResult.success && toolResult.error}
-				<div class="mb-3 rounded bg-red-100 p-2 dark:bg-red-900/30">
-					<div class="text-xs font-medium text-red-700 dark:text-red-300 mb-1">Error:</div>
-					<div class="text-sm text-red-800 dark:text-red-200" data-testid="tool-result-error">
-						{toolResult.error}
+						{#if toolResult.toolId}
+							<span
+								class="text-xs {toolResult.success
+									? 'text-green-600 dark:text-green-400'
+									: 'text-red-600 dark:text-red-400'}"
+								data-testid="tool-result-id"
+							>
+								#{toolResult.toolId}
+							</span>
+						{/if}
+					</div>
+					<div class="flex items-center space-x-2">
+						<span
+							class="text-xs {toolResult.success
+								? 'text-green-600 dark:text-green-400'
+								: 'text-red-600 dark:text-red-400'}"
+						>
+							{toolResult.success ? 'Success' : 'Error'}
+						</span>
 					</div>
 				</div>
-			{/if}
 
-			<!-- Tool result data -->
-			<div class="mt-2">
-				<div class="mb-1 text-xs font-medium {toolResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}">
-					Result:
+				<!-- Error message if failed -->
+				{#if !toolResult.success && toolResult.error}
+					<div class="mb-3 rounded bg-red-100 p-2 dark:bg-red-900/30">
+						<div class="mb-1 text-xs font-medium text-red-700 dark:text-red-300">Error:</div>
+						<div class="text-sm text-red-800 dark:text-red-200" data-testid="tool-result-error">
+							{toolResult.error}
+						</div>
+					</div>
+				{/if}
+
+				<!-- Tool result data -->
+				<div class="mt-2">
+					<div
+						class="mb-1 text-xs font-medium {toolResult.success
+							? 'text-green-700 dark:text-green-300'
+							: 'text-red-700 dark:text-red-300'}"
+					>
+						Result:
+					</div>
+					<div
+						class="rounded bg-gray-50 p-3 text-sm dark:bg-gray-800"
+						data-testid="tool-result-content"
+					>
+						<pre class="font-mono whitespace-pre-wrap">{@html formatResult(toolResult.result)}</pre>
+					</div>
 				</div>
-				<div 
-					class="rounded bg-gray-50 p-3 text-sm dark:bg-gray-800"
-					data-testid="tool-result-content"
-				>
-					<pre class="whitespace-pre-wrap font-mono">{@html formatResult(toolResult.result)}</pre>
-				</div>
+
+				<!-- Show streaming indicator if this is the latest and streaming -->
+				{#if isLatest && renderPhase === 'streaming'}
+					<div
+						class="mt-2 flex items-center space-x-2 text-xs {toolResult.success
+							? 'text-green-600 dark:text-green-400'
+							: 'text-red-600 dark:text-red-400'}"
+					>
+						<span class="animate-pulse">▋</span>
+						<span>Processing result...</span>
+					</div>
+				{/if}
 			</div>
-
-			<!-- Show streaming indicator if this is the latest and streaming -->
-			{#if isLatest && renderPhase === 'streaming'}
-				<div class="mt-2 flex items-center space-x-2 text-xs {toolResult.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}">
-					<span class="animate-pulse">▋</span>
-					<span>Processing result...</span>
-				</div>
-			{/if}
 		</div>
-	</div>
-</CollapsibleMessageRenderer>
+	</CollapsibleMessageRenderer>
 </div>

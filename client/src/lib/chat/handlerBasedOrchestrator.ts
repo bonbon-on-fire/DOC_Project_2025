@@ -1,6 +1,6 @@
 /**
  * Handler-Based Chat Orchestrator
- * 
+ *
  * Clean, modern orchestrator that uses the message handler architecture.
  */
 
@@ -12,6 +12,7 @@ import type {
 	StreamChunkEventEnvelope,
 	MessageCompleteEventEnvelope,
 	StreamCompleteEventEnvelope,
+	TaskOperationEventEnvelope,
 	ErrorEventEnvelope
 } from './sseEventTypes';
 import type { MessageHandlerRegistry } from './messageHandlers';
@@ -24,6 +25,8 @@ import { createToolsAggregateMessageHandler } from './handlers/toolsAggregateMes
 import { createSlimChatSyncManager } from './slimChatSyncManager';
 import { createSSEParser } from './sseParser';
 import { apiClient } from '$lib/api/client';
+import { taskManager } from '$lib/stores/taskManager';
+import type { TaskItem } from '$shared/types/tasks';
 
 /**
  * Modern SSE Stream Orchestrator using handler-based architecture
@@ -71,11 +74,11 @@ export class HandlerBasedSSEOrchestrator {
 		// Register handlers with the sync manager as listener
 		this.handlerRegistry.register(createTextMessageHandler(this.chatSyncManager));
 		this.handlerRegistry.register(createReasoningMessageHandler(this.chatSyncManager));
-		
+
 		// Register tool call handler for both streaming updates and complete messages
 		const toolCallHandler = createToolCallMessageHandler(this.chatSyncManager);
 		this.handlerRegistry.register(toolCallHandler);
-		
+
 		// Register tools aggregate handler for combined tool calls and results
 		const toolsAggregateHandler = createToolsAggregateMessageHandler(this.chatSyncManager);
 		this.handlerRegistry.register(toolsAggregateHandler);
@@ -103,6 +106,12 @@ export class HandlerBasedSSEOrchestrator {
 			message: userMessage,
 			chatId: chatId
 		};
+
+		// Pass chatId to tools aggregate handler for task manager updates
+		const toolsAggregateHandler = this.handlerRegistry.getHandler('tools_aggregate');
+		if (toolsAggregateHandler && 'setChatId' in toolsAggregateHandler) {
+			(toolsAggregateHandler as any).setChatId(chatId);
+		}
 
 		await this.startStream(request, userMessage);
 	}
@@ -138,7 +147,6 @@ export class HandlerBasedSSEOrchestrator {
 			}
 
 			await this.processSSEStream(response.body, userMessage);
-
 		} catch (error) {
 			console.error('Error starting stream:', error);
 			this.handleError({
@@ -168,7 +176,7 @@ export class HandlerBasedSSEOrchestrator {
 				if (done) {
 					console.log('SSE stream completed');
 					// Reset streaming state when stream naturally completes
-					this.streamingStateStore.update(state => ({
+					this.streamingStateStore.update((state) => ({
 						...state,
 						isStreaming: false,
 						error: null
@@ -199,6 +207,8 @@ export class HandlerBasedSSEOrchestrator {
 					message: error instanceof Error ? error.message : 'Stream processing error',
 					kind: 'error'
 				});
+				// On connection loss, try to reload task state if we have an active chat
+				this.handleConnectionLoss();
 			}
 		} finally {
 			this.currentReader = null;
@@ -211,7 +221,7 @@ export class HandlerBasedSSEOrchestrator {
 	private async processSSEBlock(block: string): Promise<void> {
 		try {
 			console.log('[HandlerBasedSSEOrchestrator] Processing SSE block:', block);
-			
+
 			const parsedEvent = this.sseParser.parseSSEData(block);
 			if (!parsedEvent) {
 				console.log('[HandlerBasedSSEOrchestrator] No parsed event from block');
@@ -308,7 +318,10 @@ export class HandlerBasedSSEOrchestrator {
 							kind: 'error',
 							messageId: raw.messageId ? String(raw.messageId) : undefined,
 							sequenceId: raw.sequenceId != null ? Number(raw.sequenceId) : undefined,
-							payload: { message: String(raw.payload?.message || 'Unknown error'), code: raw.payload?.code }
+							payload: {
+								message: String(raw.payload?.message || 'Unknown error'),
+								code: raw.payload?.code
+							}
 						};
 						this.chatSyncManager.processSSEEvent(env);
 						break;
@@ -323,6 +336,21 @@ export class HandlerBasedSSEOrchestrator {
 					this.chatSyncManager.processSSEEvent(env);
 					break;
 				}
+				case 'task_operation': {
+					const env: TaskOperationEventEnvelope = {
+						...base,
+						kind: 'task_operation',
+						messageId: raw.messageId ? String(raw.messageId) : undefined,
+						payload: {
+							operationType: raw.payload?.operationType || 'sync',
+							operation: raw.payload?.operation,
+							taskState: raw.payload?.taskState,
+							version: raw.payload?.version
+						}
+					};
+					this.handleTaskOperationEvent(env);
+					break;
+				}
 				case 'complete': {
 					const env: StreamCompleteEventEnvelope = {
 						...base,
@@ -335,7 +363,6 @@ export class HandlerBasedSSEOrchestrator {
 					console.warn('Unhandled SSE eventType:', parsedEvent.eventType, raw);
 				}
 			}
-
 		} catch (error) {
 			console.error('Error processing SSE block:', error, { block });
 		}
@@ -350,12 +377,108 @@ export class HandlerBasedSSEOrchestrator {
 			this.currentReader = null;
 		}
 		this.isStreamActive = false;
-		
-		this.streamingStateStore.update(state => ({
+
+		this.streamingStateStore.update((state) => ({
 			...state,
 			isStreaming: false,
 			error: null
 		}));
+	}
+
+	/**
+	 * Handle connection loss by attempting to reload task state
+	 */
+	private handleConnectionLoss(): void {
+		// Get current chat ID from the current chat store
+		const currentChat = this.getCurrentChat();
+		if (currentChat?.id) {
+			console.log(
+				'[Orchestrator] Connection lost, attempting to reload tasks for chat:',
+				currentChat.id
+			);
+			// Attempt to reload tasks from API when connection is restored
+			// This is a graceful recovery mechanism
+			setTimeout(() => {
+				taskManager.loadTasks(currentChat.id).catch((error) => {
+					console.error('Failed to reload tasks after connection loss:', error);
+				});
+			}, 2000); // Wait 2 seconds before attempting to reload
+		}
+	}
+
+	/**
+	 * Get current chat from store
+	 */
+	private getCurrentChat(): ChatDto | null {
+		let currentChat: ChatDto | null = null;
+		// Get current value from store using subscribe
+		const unsubscribe = this.currentChatStore.subscribe((value) => {
+			currentChat = value;
+		});
+		unsubscribe();
+		return currentChat;
+	}
+
+	/**
+	 * Handle task operation events from SSE
+	 */
+	private handleTaskOperationEvent(event: TaskOperationEventEnvelope): void {
+		const { chatId, payload } = event;
+
+		console.log('[Orchestrator] Processing task operation event:', {
+			chatId,
+			operationType: payload.operationType,
+			hasTaskState: !!payload.taskState,
+			version: payload.version
+		});
+
+		try {
+			switch (payload.operationType) {
+				case 'start':
+					// Set loading state when operation starts
+					taskManager.setLoading(chatId, true);
+					break;
+
+				case 'complete':
+					// Update task state when operation completes
+					if (payload.taskState) {
+						// Parse tasks from the server's task state
+						let tasks: TaskItem[] = [];
+						try {
+							if (Array.isArray(payload.taskState)) {
+								tasks = payload.taskState;
+							} else if (typeof payload.taskState === 'object' && payload.taskState.tasks) {
+								tasks = payload.taskState.tasks;
+							} else {
+								throw new Error('Invalid task state format');
+							}
+							taskManager.updateFromServerEvent(chatId, tasks, payload.version);
+						} catch (parseError) {
+							console.error('Error parsing task state:', parseError, payload.taskState);
+						}
+					}
+					// Clear loading state
+					taskManager.setLoading(chatId, false);
+					break;
+
+				case 'sync':
+					// Full sync of task state from server
+					if (payload.taskState) {
+						const tasks: TaskItem[] = Array.isArray(payload.taskState)
+							? payload.taskState
+							: payload.taskState.tasks || [];
+
+						taskManager.updateFromServerEvent(chatId, tasks, payload.version);
+					}
+					break;
+
+				default:
+					console.warn('Unknown task operation type:', payload.operationType);
+			}
+		} catch (error) {
+			console.error('Error handling task operation event:', error);
+			taskManager.setLoading(chatId, false);
+		}
 	}
 
 	/**
@@ -364,7 +487,7 @@ export class HandlerBasedSSEOrchestrator {
 	private handleError(error: ErrorEvent): void {
 		console.error('Stream orchestrator error:', error);
 
-		this.streamingStateStore.update(state => ({
+		this.streamingStateStore.update((state) => ({
 			...state,
 			isStreaming: false,
 			error: error.message
@@ -384,7 +507,7 @@ export class HandlerBasedSSEOrchestrator {
 	async cleanup(): Promise<void> {
 		await this.stopStream();
 		this.handlerRegistry.clear();
-		
+
 		this.streamingStateStore.set({
 			isStreaming: false,
 			currentMessageId: null,

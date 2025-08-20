@@ -121,7 +121,7 @@ export function updateMessageState(messageId: string, updates: Partial<MessageSt
 		};
 
 		// Check if any values actually changed
-		const hasChanges = Object.keys(updates).some(key => {
+		const hasChanges = Object.keys(updates).some((key) => {
 			const updateKey = key as keyof MessageState;
 			const newValue = updates[updateKey];
 			const existingValue = existingState[updateKey];

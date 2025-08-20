@@ -11,7 +11,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 
 	it('should generate unique IDs for tool calls without IDs', () => {
 		const messageId = 'msg_123';
-		
+
 		// First tool call
 		const envelope1: StreamChunkEventEnvelope = {
 			chatId: 'chat_1',
@@ -22,8 +22,8 @@ describe('ToolCallMessageHandler - ID Management', () => {
 			kind: 'tools_call_update',
 			payload: {
 				delta: '',
-				toolCallUpdate: { 
-					function_name: 'calculator', 
+				toolCallUpdate: {
+					function_name: 'calculator',
 					function_args: JSON.stringify({ a: 1, b: 2 }),
 					index: 0
 				}
@@ -31,7 +31,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 		};
 
 		handler.processChunk(messageId, envelope1);
-		
+
 		// Second tool call
 		const envelope2: StreamChunkEventEnvelope = {
 			chatId: 'chat_1',
@@ -42,8 +42,8 @@ describe('ToolCallMessageHandler - ID Management', () => {
 			kind: 'tools_call_update',
 			payload: {
 				delta: '',
-				toolCallUpdate: { 
-					function_name: 'calculator', 
+				toolCallUpdate: {
+					function_name: 'calculator',
 					function_args: JSON.stringify({ a: 3, b: 4 }),
 					index: 1
 				}
@@ -51,7 +51,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 		};
 
 		const snapshot = handler.processChunk(messageId, envelope2);
-		
+
 		expect(snapshot.toolCalls).toHaveLength(2);
 		expect(snapshot.toolCalls[0].id).toBe(`${messageId}_tool_0`);
 		expect(snapshot.toolCalls[1].id).toBe(`${messageId}_tool_1`);
@@ -59,7 +59,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 
 	it('should preserve provided tool call IDs', () => {
 		const messageId = 'msg_123';
-		
+
 		// First tool call with ID
 		const envelope1: StreamChunkEventEnvelope = {
 			chatId: 'chat_1',
@@ -70,9 +70,9 @@ describe('ToolCallMessageHandler - ID Management', () => {
 			kind: 'tools_call_update',
 			payload: {
 				delta: '',
-				toolCallUpdate: { 
+				toolCallUpdate: {
 					tool_call_id: 'tool_abc',
-					function_name: 'calculator', 
+					function_name: 'calculator',
 					function_args: JSON.stringify({ a: 1, b: 2 }),
 					index: 0
 				}
@@ -80,7 +80,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 		};
 
 		handler.processChunk(messageId, envelope1);
-		
+
 		// Second tool call with ID
 		const envelope2: StreamChunkEventEnvelope = {
 			chatId: 'chat_1',
@@ -91,9 +91,9 @@ describe('ToolCallMessageHandler - ID Management', () => {
 			kind: 'tools_call_update',
 			payload: {
 				delta: '',
-				toolCallUpdate: { 
+				toolCallUpdate: {
 					tool_call_id: 'tool_def',
-					function_name: 'search', 
+					function_name: 'search',
 					function_args: JSON.stringify({ query: 'test' }),
 					index: 1
 				}
@@ -101,7 +101,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 		};
 
 		const snapshot = handler.processChunk(messageId, envelope2);
-		
+
 		expect(snapshot.toolCalls).toHaveLength(2);
 		expect(snapshot.toolCalls[0].id).toBe('tool_abc');
 		expect(snapshot.toolCalls[1].id).toBe('tool_def');
@@ -148,7 +148,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 		};
 
 		handler.processChunk(messageId, envelope2);
-		
+
 		// Add a different tool call
 		const envelope3: StreamChunkEventEnvelope = {
 			chatId: 'chat_1',
@@ -169,7 +169,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 		};
 
 		const snapshot = handler.processChunk(messageId, envelope3);
-		
+
 		// Should have 2 tool calls, not 3
 		expect(snapshot.toolCalls).toHaveLength(2);
 		expect(snapshot.toolCalls[0].id).toBe('tool_1');
@@ -179,7 +179,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 
 	it('should handle multiple tool calls in streaming chunks', () => {
 		const messageId = 'msg_123';
-		
+
 		// First tool call
 		const envelope1: StreamChunkEventEnvelope = {
 			chatId: 'chat_1',
@@ -200,7 +200,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 		};
 
 		handler.processChunk(messageId, envelope1);
-		
+
 		// Second tool call
 		const envelope2: StreamChunkEventEnvelope = {
 			chatId: 'chat_1',
@@ -249,7 +249,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 
 	it('should handle complete tool call message', () => {
 		const messageId = 'msg_123';
-		
+
 		// Send a complete tools_call message (not a streaming update)
 		const envelope: StreamChunkEventEnvelope = {
 			chatId: 'chat_1',
@@ -277,7 +277,7 @@ describe('ToolCallMessageHandler - ID Management', () => {
 		};
 
 		const snapshot = handler.processChunk(messageId, envelope);
-		
+
 		expect(snapshot.toolCalls).toHaveLength(2);
 		expect(snapshot.toolCalls[0].id).toBe('tool_1');
 		expect(snapshot.toolCalls[0].name).toBe('calculator');

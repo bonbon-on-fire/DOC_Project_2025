@@ -12,7 +12,8 @@ test.describe('Comprehensive Reasoning Tests', () => {
 			console.log('🧠 Testing reasoning-first streaming behavior');
 
 			// Use the mock's reasoning-first trigger
-			const reasoningMessage = 'Test reasoning capabilities\nReason: Think through this step by step';
+			const reasoningMessage =
+				'Test reasoning capabilities\nReason: Think through this step by step';
 
 			const input = page.getByPlaceholder('Start a new conversation...');
 			await input.fill(reasoningMessage);
@@ -33,7 +34,9 @@ test.describe('Comprehensive Reasoning Tests', () => {
 			await expect(reasoningRenderer).toBeVisible({ timeout: 10000 });
 
 			// Verify reasoning content appears progressively
-			await expect(reasoningContainer).toContainText('Test reasoning capabilities', { timeout: 15000 });
+			await expect(reasoningContainer).toContainText('Test reasoning capabilities', {
+				timeout: 15000
+			});
 
 			console.log('✅ Reasoning content streaming verified');
 
@@ -76,11 +79,11 @@ Test controlled reasoning timing
 
 			// Verify progressive content loading
 			const initialContent = await reasoningContainer.textContent();
-			
+
 			// Wait a bit and check that content has grown
 			await page.waitForTimeout(2000);
 			const laterContent = await reasoningContainer.textContent();
-			
+
 			expect(laterContent?.length).toBeGreaterThan(initialContent?.length || 0);
 
 			console.log('✅ Timing-controlled reasoning streaming verified');
@@ -91,7 +94,8 @@ Test controlled reasoning timing
 		test('should show reasoning components and structure correctly', async ({ page }) => {
 			console.log('📺 Testing reasoning component structure');
 
-			const reasoningMessage = 'Component structure test\nReason: This validates UI components are present';
+			const reasoningMessage =
+				'Component structure test\nReason: This validates UI components are present';
 
 			const input = page.getByPlaceholder('Start a new conversation...');
 			await input.fill(reasoningMessage);
@@ -124,7 +128,8 @@ Test controlled reasoning timing
 		test('should display reasoning content with proper formatting', async ({ page }) => {
 			console.log('📝 Testing reasoning content display and formatting');
 
-			const reasoningMessage = 'Formatting test\nReason: This reasoning contains meaningful content that should be displayed properly';
+			const reasoningMessage =
+				'Formatting test\nReason: This reasoning contains meaningful content that should be displayed properly';
 
 			const input = page.getByPlaceholder('Start a new conversation...');
 			await input.fill(reasoningMessage);
@@ -149,7 +154,8 @@ Test controlled reasoning timing
 		test('should show accessibility attributes correctly', async ({ page }) => {
 			console.log('♿ Testing reasoning accessibility features');
 
-			const reasoningMessage = 'Accessibility test\nReason: This validates ARIA attributes and accessibility';
+			const reasoningMessage =
+				'Accessibility test\nReason: This validates ARIA attributes and accessibility';
 
 			const input = page.getByPlaceholder('Start a new conversation...');
 			await input.fill(reasoningMessage);
@@ -170,7 +176,7 @@ Test controlled reasoning timing
 
 			// Button should be focusable
 			await reasoningToggle.focus();
-			const isFocused = await reasoningToggle.evaluate(el => document.activeElement === el);
+			const isFocused = await reasoningToggle.evaluate((el) => document.activeElement === el);
 			expect(isFocused).toBe(true);
 
 			console.log('✅ Reasoning accessibility verified');
@@ -183,7 +189,7 @@ Test controlled reasoning timing
 
 			// First reasoning message
 			const firstMessage = 'First reasoning\nReason: First step of thinking';
-			
+
 			const input = page.getByPlaceholder('Start a new conversation...');
 			await input.fill(firstMessage);
 			await page.getByRole('button', { name: 'New Chat' }).click();
@@ -219,6 +225,5 @@ Test controlled reasoning timing
 
 			console.log('✅ Multiple reasoning messages handling verified');
 		});
-
 	});
 });

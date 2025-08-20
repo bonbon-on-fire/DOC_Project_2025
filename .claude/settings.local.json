@@ -35,7 +35,20 @@
       "Bash(tasklist)",
       "mcp__sequential-thinking-tools__sequentialthinking",
       "Bash(cmd /c:*)",
-      "Bash(npm run dev:*)"
+      "Bash(npm run dev:*)",
+      "mcp__azure-devops-mcp__listPullRequests",
+      "mcp__hitl-mcp-server__ask_human",
+      "Bash(dotnet clean:*)",
+      "Bash(dotnet restore:*)",
+      "Bash(dotnet pack:*)",
+      "Bash(npm run lint)",
+      "Bash(npm run format:*)",
+      "Bash(cat:*)",
+      "Bash(npm install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git reset:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": [],
@@ -43,7 +56,8 @@
     "additionalDirectories": [
       "B:\\b\\sources\\DOC_Project_2025\\submodules\\LmDotnetTools\\src",
       "B:\\b\\sources\\DOC_Project_2025",
-      "B:\\mnt\\b\\sources\\DOC_Project_2025"
+      "B:\\mnt\\b\\sources\\DOC_Project_2025",
+      "B:\\b\\sources\\DOC_Project_2025\\submodules"
     ]
   },
   "enabledMcpjsonServers": [

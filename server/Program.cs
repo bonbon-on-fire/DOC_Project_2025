@@ -83,8 +83,9 @@ builder.Services.AddSingleton<SqliteConnectionFactory>(sp =>
 
 builder.Services.AddSingleton<ISqliteConnectionFactory>(sp => sp.GetRequiredService<SqliteConnectionFactory>());
 
-// Register IChatStorage
+// Register IChatStorage and ITaskStorage
 builder.Services.AddScoped<IChatStorage, SqliteChatStorage>();
+builder.Services.AddScoped<ITaskStorage, SqliteTaskStorage>();
 
 // Add SignalR with increased timeout values
 builder.Services.AddSignalR(hubOptions =>

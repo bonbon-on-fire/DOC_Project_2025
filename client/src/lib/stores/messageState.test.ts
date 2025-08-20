@@ -55,13 +55,13 @@ describe('Message State Management', () => {
 		it('should not trigger store update when values have not changed', () => {
 			// Set initial state
 			updateMessageState('msg-1', { expanded: true, renderPhase: 'streaming' });
-			
+
 			// Capture current state reference
 			const statesBefore = get(messageStates);
-			
+
 			// Update with identical values
 			updateMessageState('msg-1', { expanded: true, renderPhase: 'streaming' });
-			
+
 			// State reference should be unchanged (no new object created)
 			const statesAfter = get(messageStates);
 			expect(statesAfter).toBe(statesBefore); // Reference equality check
@@ -70,13 +70,13 @@ describe('Message State Management', () => {
 		it('should not trigger store update for partial identical values', () => {
 			// Set initial state
 			updateMessageState('msg-1', { expanded: true, renderPhase: 'streaming' });
-			
+
 			// Capture current state reference
 			const statesBefore = get(messageStates);
-			
+
 			// Update with only identical partial values
 			updateMessageState('msg-1', { expanded: true });
-			
+
 			// State reference should be unchanged (no new object created)
 			const statesAfter = get(messageStates);
 			expect(statesAfter).toBe(statesBefore); // Reference equality check
@@ -85,13 +85,13 @@ describe('Message State Management', () => {
 		it('should trigger store update when values actually change', () => {
 			// Set initial state
 			updateMessageState('msg-1', { expanded: true, renderPhase: 'initial' });
-			
+
 			// Capture current state reference
 			const statesBefore = get(messageStates);
-			
+
 			// Update with different values
 			updateMessageState('msg-1', { expanded: false });
-			
+
 			// State reference should have changed (new object created)
 			const statesAfter = get(messageStates);
 			expect(statesAfter).not.toBe(statesBefore); // Reference inequality check

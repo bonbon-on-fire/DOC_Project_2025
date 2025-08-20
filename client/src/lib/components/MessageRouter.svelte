@@ -32,7 +32,6 @@
 	$: messageSnapshotIsStreaming = messageSnapshot?.isStreaming;
 	$: messageSnapshotType = messageSnapshot?.messageType;
 
-
 	/**
 	 * Attempts to resolve the appropriate renderer for the message type.
 	 * Falls back to MessageBubble on any error.
@@ -44,7 +43,7 @@
 
 			// Determine the effective message type
 			const effectiveMessageType = message.messageType || 'text';
-			
+
 			// Log routing decision for debugging
 			if (effectiveMessageType === 'tools_aggregate') {
 				console.log('[MessageRouter] Routing tools_aggregate message:', {
@@ -139,10 +138,13 @@
 	// Reactive: drive render phase and expansion from external policy and snapshots
 	// Now uses message-specific values to prevent unnecessary updates
 	$: if (mounted && message?.id && messageSnapshotPhase !== undefined) {
-		const newPhase = messageSnapshotPhase === 'streaming' ? 'streaming' : 
-						(messageSnapshotPhase === 'complete' ? 'complete' : 
-						 (currentMessageState?.renderPhase ?? 'initial'));
-		
+		const newPhase =
+			messageSnapshotPhase === 'streaming'
+				? 'streaming'
+				: messageSnapshotPhase === 'complete'
+					? 'complete'
+					: (currentMessageState?.renderPhase ?? 'initial');
+
 		if (currentMessageState?.renderPhase !== newPhase) {
 			handleStateChange({ renderPhase: newPhase });
 		}
@@ -153,10 +155,12 @@
 		if (messageSnapshotIsStreaming && !currentMessageState?.expanded) {
 			// Expand while streaming
 			handleStateChange({ expanded: true });
-		} else if (!messageSnapshotIsStreaming && 
-				   messageSnapshotType === 'reasoning' && 
-				   messageSnapshotPhase === 'complete' && 
-				   currentMessageState?.expanded) {
+		} else if (
+			!messageSnapshotIsStreaming &&
+			messageSnapshotType === 'reasoning' &&
+			messageSnapshotPhase === 'complete' &&
+			currentMessageState?.expanded
+		) {
 			// Collapse reasoning on completion; text stays as-is
 			handleStateChange({ expanded: false });
 		}

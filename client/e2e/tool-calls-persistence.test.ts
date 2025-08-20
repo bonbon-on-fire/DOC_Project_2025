@@ -3,10 +3,10 @@ import { test, expect } from '@playwright/test';
 test.describe('Tool Call Persistence', () => {
 	test.beforeEach(async ({ page }) => {
 		// Capture browser console logs for debugging
-		page.on('console', msg => {
+		page.on('console', (msg) => {
 			console.log(`[Browser ${msg.type()}]:`, msg.text());
 		});
-		
+
 		await page.goto('http://localhost:5173/chat');
 		await page.waitForLoadState('networkidle');
 		await expect(page.getByPlaceholder('Start a new conversation...')).toBeVisible();
@@ -85,7 +85,7 @@ Calculate 100 times 50
 		// Wait for the calculation to appear (math renderer)
 		const mathCalcButton = page.getByRole('button', { name: /Math Calculation/i }).first();
 		await expect(mathCalcButton).toBeVisible({ timeout: 15000 });
-		
+
 		// Verify the calculation expression is visible
 		const messageList = page.getByTestId('message-list');
 		await expect(messageList.locator('text=/100 \\* 50/i')).toBeVisible();
@@ -93,20 +93,20 @@ Calculate 100 times 50
 		// Now we should have two chats in the sidebar
 		const sidebar = page.getByTestId('chat-sidebar');
 		await expect(sidebar).toBeVisible();
-		
+
 		// Find the first chat in the sidebar (should contain "New York" or be the second item since new chats appear first)
 		const chatItems = sidebar.locator('[data-testid="chat-item"]');
 		const chatCount = await chatItems.count();
 		console.log('Number of chats in sidebar:', chatCount);
-		
+
 		// The first chat should be the second item in the list (newer chats appear first)
 		if (chatCount >= 2) {
 			// Click on the second chat item (which is our first created chat)
 			await chatItems.nth(1).click();
-			
+
 			// Wait for the chat to load
 			await page.waitForTimeout(2000); // Give time for the chat to switch
-			
+
 			// Verify tool call from first chat is visible again
 			console.log('Verifying first chat tool call is restored');
 			const restoredToolCall = page.getByTestId('tool-call-renderer').first();
@@ -114,7 +114,7 @@ Calculate 100 times 50
 			await expect(page.getByTestId('tool-call-name').first()).toContainText('get_weather');
 			await expect(page.getByTestId('tool-call-args').first()).toContainText('New York');
 			await expect(page.getByTestId('tool-call-args').first()).toContainText('fahrenheit');
-			
+
 			// Verify the second chat's tool call is NOT visible
 			await expect(messageList.locator('text=/100 \\* 50/i')).not.toBeVisible();
 		}
@@ -160,7 +160,7 @@ Search for TypeScript best practices
 		const toolCallRenderer = page.getByTestId('tool-call-renderer').first();
 		await expect(toolCallRenderer).toBeVisible({ timeout: 15000 });
 		await expect(page.getByTestId('tool-call-name').first()).toContainText('search');
-		
+
 		const argsSection = page.getByTestId('tool-call-args').first();
 		await expect(argsSection).toContainText('TypeScript best practices');
 		await expect(argsSection).toContainText('limit:');
@@ -174,13 +174,13 @@ Search for TypeScript best practices
 		// After reload, we need to select the chat from the sidebar
 		const sidebar = page.getByTestId('chat-sidebar');
 		await expect(sidebar).toBeVisible({ timeout: 10000 });
-		
+
 		// Click on the first chat in the sidebar (the one we just created)
 		const chatItems = sidebar.locator('[data-testid="chat-item"]');
 		const firstChat = chatItems.first();
 		await expect(firstChat).toBeVisible({ timeout: 10000 });
 		await firstChat.click();
-		
+
 		// Wait for the chat to load
 		await page.waitForTimeout(2000);
 		await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });
@@ -190,7 +190,7 @@ Search for TypeScript best practices
 		const restoredToolCall = page.getByTestId('tool-call-renderer').first();
 		await expect(restoredToolCall).toBeVisible({ timeout: 15000 });
 		await expect(page.getByTestId('tool-call-name').first()).toContainText('search');
-		
+
 		const restoredArgs = page.getByTestId('tool-call-args').first();
 		await expect(restoredArgs).toContainText('TypeScript best practices');
 		await expect(restoredArgs).toContainText('limit:');
@@ -272,16 +272,18 @@ Send an email`;
 
 		// Verify first chat's tool call is NOT visible
 		await expect(page.getByTestId('tool-call-name').first()).not.toContainText('database_query');
-		await expect(page.getByTestId('tool-call-args').first()).not.toContainText('SELECT * FROM users');
+		await expect(page.getByTestId('tool-call-args').first()).not.toContainText(
+			'SELECT * FROM users'
+		);
 
 		// Go back to first chat via sidebar
 		const sidebar = page.getByTestId('chat-sidebar');
 		await expect(sidebar).toBeVisible();
-		
+
 		const chatItems = sidebar.locator('[data-testid="chat-item"]');
 		// Second item should be the first chat (newer chats appear first)
 		await chatItems.nth(1).click();
-		
+
 		// Wait for chat to switch
 		await page.waitForTimeout(2000);
 		await expect(page.getByTestId('message-list')).toBeVisible({ timeout: 20000 });

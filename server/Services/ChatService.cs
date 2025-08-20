@@ -4,10 +4,12 @@ using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Options;
 using AIChat.Server.Storage;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using AIChat.Server.Models;
 using AchieveAi.LmDotnetTools.LmCore.Middleware;
 using AIChat.Server.Functions;
+using AchieveAi.LmDotnetTools.Misc.Utils;
 
 namespace AIChat.Server.Services;
 
@@ -50,6 +52,11 @@ public class ChatService : IChatService, IToolResultCallback
             registry.AddProvider(weatherProvider);
             _logger.LogInformation("Added WeatherFunction provider to registry");
             
+            // Add TaskManager functions using AddFunctionsFromObject
+            var taskManager = new TaskManager();
+            registry.AddFunctionsFromObject(taskManager, "TaskManager");
+            _logger.LogInformation("Added TaskManager functions to registry");
+            
             // Build function contracts and handlers
             var (contracts, handlers) = registry.Build();
             
@@ -89,7 +96,8 @@ public class ChatService : IChatService, IToolResultCallback
     private string? _currentMessageId;
     private int _nextSequence;
     // Map ToolCallId to MessageId and SequenceNumber for proper correlation
-    private readonly Dictionary<string, (string MessageId, int SequenceNumber)> _toolCallToMessageMap = new();
+    // Using ConcurrentDictionary for thread-safe access during async streaming operations
+    private readonly ConcurrentDictionary<string, (string MessageId, int SequenceNumber)> _toolCallToMessageMap = new();
 
     // Events for real-time notifications
     public event Func<MessageCreatedEvent, Task>? MessageCreated;
@@ -800,9 +808,9 @@ public class ChatService : IChatService, IToolResultCallback
                     var toolCallSequence = messageIndex + toolCallIndex;
                     
                     // Map ToolCallId to MessageId and SequenceNumber when we first see it during streaming
-                    if (!string.IsNullOrEmpty(toolCallUpdate.ToolCallId) && !_toolCallToMessageMap.ContainsKey(toolCallUpdate.ToolCallId))
+                    if (!string.IsNullOrEmpty(toolCallUpdate.ToolCallId))
                     {
-                        _toolCallToMessageMap[toolCallUpdate.ToolCallId] = (toolCallMessageId, toolCallSequence);
+                        _toolCallToMessageMap.TryAdd(toolCallUpdate.ToolCallId, (toolCallMessageId, toolCallSequence));
                         _logger.LogInformation(
                             "Mapped ToolCallId {ToolCallId} to MessageId {MessageId} with Sequence {Sequence} during streaming",
                             toolCallUpdate.ToolCallId,
