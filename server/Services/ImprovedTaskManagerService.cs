@@ -1,3 +1,10 @@
+using AchieveAi.LmDotnetTools.LmCore.Middleware;
+using AchieveAi.LmDotnetTools.Misc.Utils;
+using AIChat.Server.Storage;
+using System.Collections.Concurrent;
+using System.Text.Json;
+using static AchieveAi.LmDotnetTools.Misc.Utils.TaskManager;
+
 namespace AIChat.Server.Services;
 
 /// <summary>
@@ -152,4 +159,6 @@ public class ImprovedTaskManagerService : ITaskManagerService
         
         return registry;
     }
+
+    Task<(string, IList<TaskManager.TaskItem>)?> ITaskManagerService.GetTaskStateAsync(string chatId, CancellationToken ct) => throw new NotImplementedException();
 }

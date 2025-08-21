@@ -1,3 +1,16 @@
+using AchieveAi.LmDotnetTools.LmCore.Messages;
+using AchieveAi.LmDotnetTools.OpenAIProvider.Agents;
+using AIChat.Server.Services.TestMode;
+using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using System.Collections.Immutable;
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Xunit;
+using Xunit.Abstractions;
+
 namespace AIChat.Server.Tests;
 
 /// <summary>

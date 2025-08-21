@@ -1,3 +1,12 @@
+using AchieveAi.LmDotnetTools.LmCore.Agents;
+using AchieveAi.LmDotnetTools.LmCore.Messages;
+using AchieveAi.LmDotnetTools.LmCore.Middleware;
+using AIChat.Server.Models;
+using AIChat.Server.Storage;
+using Microsoft.Extensions.Options;
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
+
 namespace AIChat.Server.Services;
 
 public class ChatService : IChatService, IToolResultCallback

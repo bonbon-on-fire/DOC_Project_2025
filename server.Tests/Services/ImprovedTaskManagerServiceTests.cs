@@ -56,14 +56,14 @@ public class ImprovedTaskManagerServiceTests
         var savedTaskState = new ChatTaskState
         {
             ChatId = chatId,
-            TaskManager = JsonDocument.Parse("{}").RootElement,
+            TaskManager = new TaskManager(),
             Version = 1,
             LastUpdatedUtc = DateTime.UtcNow
         };
 
         _taskStorageMock.Setup(x => x.SaveTasksAsync(
                 chatId,
-                It.IsAny<JsonElement>(),
+                It.IsAny<TaskManager>(),
                 0,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(savedTaskState);
@@ -74,7 +74,7 @@ public class ImprovedTaskManagerServiceTests
         // Assert
         _taskStorageMock.Verify(x => x.SaveTasksAsync(
             chatId,
-            It.IsAny<JsonElement>(),
+            It.IsAny<TaskManager>(),
             0,
             It.IsAny<CancellationToken>()), Times.Once);
     }

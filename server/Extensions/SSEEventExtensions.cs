@@ -1,3 +1,6 @@
+using AIChat.Server.Models.SSE;
+using AIChat.Server.Services;
+
 namespace AIChat.Server.Extensions;
 
 /// <summary>
