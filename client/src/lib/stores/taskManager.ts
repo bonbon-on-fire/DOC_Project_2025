@@ -119,65 +119,30 @@ function createTaskManagerStore() {
 	return {
 		subscribe,
 
-		// Load tasks for a specific chat from the API
-		loadTasks: async (chatId: string) => {
-			update((state) => ({ ...state, isLoading: true, error: null }));
-
-			try {
-				const response = await fetch(`/api/chat/${chatId}/tasks`);
-
-				if (!response.ok) {
-					if (response.status === 404) {
-						// No tasks for this chat yet, initialize empty
-						update((state) => {
-							const taskState: ChatTaskState = {
-								chatId,
-								tasks: [],
-								version: 0,
-								lastUpdatedUtc: new Date().toISOString()
-							};
-							state.tasks.set(chatId, taskState);
-							state.nextIds.set(chatId, 1);
-							return { ...state, isLoading: false, activeChat: chatId };
-						});
-						return;
-					}
-					throw new Error(`Failed to load tasks: ${response.statusText}`);
-				}
-
-				const data = await response.json();
-
-				// Parse the tasks from the server's JsonElement format
+		// Initialize tasks for a chat (from initial chat data or SSE updates)
+		initializeTasks: (chatId: string, tasks?: TaskItem[]) => {
+			update((state) => {
 				const taskState: ChatTaskState = {
-					chatId: data.chatId,
-					tasks: data.tasks || [],
-					version: data.version || 0,
+					chatId,
+					tasks: tasks || [],
+					version: 0,
 					lastUpdatedUtc: new Date().toISOString()
 				};
 
 				// Calculate next ID based on existing tasks
 				let maxId = 0;
-				const findMaxId = (tasks: TaskItem[]) => {
-					for (const task of tasks) {
+				const findMaxId = (taskList: TaskItem[]) => {
+					for (const task of taskList) {
 						if (task.id > maxId) maxId = task.id;
 						if (task.subtasks) findMaxId(task.subtasks);
 					}
 				};
-				findMaxId(taskState.tasks);
+				if (tasks) findMaxId(tasks);
 
-				update((state) => {
-					state.tasks.set(chatId, taskState);
-					state.nextIds.set(chatId, maxId + 1);
-					return { ...state, isLoading: false, activeChat: chatId };
-				});
-			} catch (error) {
-				console.error('Error loading tasks:', error);
-				update((state) => ({
-					...state,
-					isLoading: false,
-					error: error instanceof Error ? error.message : 'Failed to load tasks'
-				}));
-			}
+				state.tasks.set(chatId, taskState);
+				state.nextIds.set(chatId, maxId + 1);
+				return { ...state, activeChat: chatId };
+			});
 		},
 
 		// Add a new task or subtask
@@ -736,17 +701,35 @@ function createTaskManagerStore() {
 			return taskManager.listTasks(chatId);
 		},
 
-		// Update from server event (maintains existing functionality)
-		updateFromServerEvent: (chatId: string, tasks: TaskItem[], version?: number) => {
+		// Update from SSE task update event
+		updateFromSSE: (chatId: string, taskState: any) => {
 			update((state) => {
+				// Parse tasks from the SSE payload (could be JsonElement or parsed array)
+				let tasks: TaskItem[] = [];
+
+				if (Array.isArray(taskState)) {
+					tasks = taskState;
+				} else if (taskState && typeof taskState === 'object') {
+					// Handle case where taskState might be wrapped or in a different format
+					if (taskState.tasks) {
+						tasks = taskState.tasks;
+					} else if (taskState.value) {
+						// Handle JsonElement format
+						tasks = taskState.value;
+					} else {
+						// Assume the object itself is the task array
+						tasks = Object.values(taskState);
+					}
+				}
+
 				const existing = state.tasks.get(chatId);
-				const taskState: ChatTaskState = {
+				const chatTaskState: ChatTaskState = {
 					chatId,
 					tasks,
-					version: version ?? (existing?.version ?? 0) + 1,
+					version: (existing?.version ?? 0) + 1,
 					lastUpdatedUtc: new Date().toISOString()
 				};
-				state.tasks.set(chatId, taskState);
+				state.tasks.set(chatId, chatTaskState);
 
 				// Update next ID counter
 				let maxId = 0;

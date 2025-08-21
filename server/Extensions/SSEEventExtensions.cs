@@ -45,6 +45,12 @@ public static class SSEEventExtensions
                 Result = toolResultEvent.Result,
                 IsError = toolResultEvent.IsError
             },
+            TaskUpdateStreamEvent taskUpdateEvent => new TaskUpdateStreamChunkPayload
+            {
+                Delta = "", // Required property for base class
+                TaskState = taskUpdateEvent.TaskState,
+                OperationType = taskUpdateEvent.OperationType
+            },
             _ => throw new InvalidOperationException($"Unsupported stream event type: {streamEvent.GetType().Name}")
         };
 

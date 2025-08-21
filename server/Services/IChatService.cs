@@ -296,6 +296,9 @@ public record ChatDto
 
     [JsonPropertyName("messages")]
     public List<MessageDto> Messages { get; init; } = new();
+    
+    [JsonPropertyName("tasks")]
+    public System.Text.Json.JsonElement? Tasks { get; init; }
 }
 
 // Enable polymorphic serialization so derived message content (text/reasoning) is included in JSON

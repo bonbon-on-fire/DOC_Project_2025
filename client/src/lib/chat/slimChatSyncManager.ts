@@ -16,8 +16,9 @@ import type {
 	StreamCompleteEventEnvelope,
 	ErrorEventEnvelope
 } from './sseEventTypes';
-import { SSEEventGuards } from './sseEventTypes';
+import { SSEEventGuards, StreamChunkPayloadGuards } from './sseEventTypes';
 import type { MessageHandlerRegistry, HandlerEvent, HandlerEventListener } from './messageHandlers';
+import { taskManager } from '$lib/stores/taskManager';
 
 /**
  * Slim chat sync manager - just routes events to handlers
@@ -128,6 +129,12 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			`[SlimChatSyncManager] Handling stream chunk: kind=${envelope.kind}, messageId=${envelope.messageId}`
 		);
 
+		// Handle task updates separately - they're not messages
+		if (envelope.kind === 'task_update') {
+			this.handleTaskUpdateEvent(envelope);
+			return;
+		}
+
 		// Special logging for tool calls
 		if (envelope.kind === 'tools_call_update') {
 			console.log('[SlimChatSyncManager] Tool call chunk received:', {
@@ -174,6 +181,30 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			this.updateStreamingState(displayId, snapshot.messageType, snapshot);
 		} catch (error) {
 			console.error(`Error processing chunk for ${envelope.kind}:`, error);
+		}
+	}
+
+	/**
+	 * Handle task update event - update task store with new state
+	 */
+	private handleTaskUpdateEvent(envelope: StreamChunkEventEnvelope): void {
+		console.log('[SlimChatSyncManager] Handling task update event:', {
+			chatId: envelope.chatId,
+			messageId: envelope.messageId,
+			payload: envelope.payload
+		});
+
+		if (StreamChunkPayloadGuards.isTaskUpdateStreamChunk(envelope.payload)) {
+			const { taskState, operationType } = envelope.payload;
+
+			console.log('[SlimChatSyncManager] Updating task store with:', {
+				chatId: envelope.chatId,
+				operationType,
+				taskState
+			});
+
+			// Update the task store with the new state from server
+			taskManager.updateFromSSE(envelope.chatId, taskState);
 		}
 	}
 

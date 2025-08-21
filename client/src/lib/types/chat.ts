@@ -46,6 +46,7 @@ export interface ChatDto {
 	messages: (TextMessageDto | ReasoningMessageDto | ToolCallMessageDto | MessageDto)[];
 	createdAt: Date | string;
 	updatedAt: Date | string;
+	tasks?: any; // JsonElement from server containing task state
 }
 
 export interface MessageDto {

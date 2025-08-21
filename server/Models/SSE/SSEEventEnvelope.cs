@@ -123,6 +123,18 @@ public class ToolResultStreamChunkPayload : StreamChunkPayload
 }
 
 /// <summary>
+/// Payload for task update streaming chunks
+/// </summary>
+public class TaskUpdateStreamChunkPayload : StreamChunkPayload
+{
+    [JsonPropertyName("taskState")]
+    public required System.Text.Json.JsonElement TaskState { get; set; }
+    
+    [JsonPropertyName("operationType")]
+    public required string OperationType { get; set; }
+}
+
+/// <summary>
 /// Envelope for complete message events
 /// </summary>
 public class MessageCompleteEventEnvelope : SSEEventEnvelope

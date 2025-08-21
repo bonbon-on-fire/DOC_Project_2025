@@ -87,6 +87,9 @@ builder.Services.AddSingleton<ISqliteConnectionFactory>(sp => sp.GetRequiredServ
 builder.Services.AddScoped<IChatStorage, SqliteChatStorage>();
 builder.Services.AddScoped<ITaskStorage, SqliteTaskStorage>();
 
+// Register TaskManagerService (using improved version)
+builder.Services.AddScoped<ITaskManagerService, ImprovedTaskManagerService>();
+
 // Add SignalR with increased timeout values
 builder.Services.AddSignalR(hubOptions =>
 {
@@ -210,6 +213,9 @@ builder.Services.AddLogging(logging =>
 
 // Add Server-Sent Events services
 builder.Services.AddServerSentEvents();
+
+// Add task management services
+// Removed ChatTaskManager - using TaskManager from LmDotNet directly
 
 // Add chat service
 builder.Services.AddScoped<IChatService, ChatService>();

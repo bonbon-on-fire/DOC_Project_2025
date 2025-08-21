@@ -128,6 +128,15 @@ export interface ToolResultStreamChunkPayload extends StreamChunkPayload {
 }
 
 /**
+ * Payload for task update streaming chunks
+ * Matches: AIChat.Server.Models.SSE.TaskUpdateStreamChunkPayload
+ */
+export interface TaskUpdateStreamChunkPayload extends StreamChunkPayload {
+	taskState: any; // JsonElement from server
+	operationType: string; // 'sync', 'add', 'update', 'delete', etc.
+}
+
+/**
  * Envelope for streaming chunk events (delta updates)
  * Matches: AIChat.Server.Models.SSE.StreamChunkEventEnvelope
  */
@@ -138,7 +147,8 @@ export interface StreamChunkEventEnvelope extends SSEEventEnvelope {
 		| TextStreamChunkPayload
 		| ReasoningStreamChunkPayload
 		| ToolCallUpdateStreamChunkPayload
-		| ToolResultStreamChunkPayload;
+		| ToolResultStreamChunkPayload
+		| TaskUpdateStreamChunkPayload;
 }
 
 // ============================================================================
@@ -378,6 +388,15 @@ export namespace StreamChunkPayloadGuards {
 		payload: StreamChunkPayload
 	): payload is ToolResultStreamChunkPayload {
 		return 'toolCallId' in (payload as any) && 'result' in (payload as any);
+	}
+
+	/**
+	 * Type guard for TaskUpdateStreamChunkPayload
+	 */
+	export function isTaskUpdateStreamChunk(
+		payload: StreamChunkPayload
+	): payload is TaskUpdateStreamChunkPayload {
+		return 'taskState' in (payload as any) && 'operationType' in (payload as any);
 	}
 }
 
