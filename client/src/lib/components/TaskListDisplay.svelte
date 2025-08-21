@@ -12,10 +12,14 @@
 
 	// Get status color class for icons
 	function getStatusIconClass(status: string): string {
-		switch (status) {
+		// Handle both PascalCase and lowercase status values
+		const normalizedStatus = status.charAt(0).toUpperCase() + status.slice(1);
+		switch (normalizedStatus) {
 			case 'NotStarted':
+			case 'Notstarted': // Handle "notStarted" -> "NotStarted"
 				return 'text-gray-500';
 			case 'InProgress':
+			case 'Inprogress': // Handle "inProgress" -> "InProgress"
 				return 'text-blue-600';
 			case 'Completed':
 				return 'text-green-600';
@@ -28,10 +32,14 @@
 
 	// Get status color class for text
 	function getStatusTextClass(status: string): string {
-		switch (status) {
+		// Handle both PascalCase and lowercase status values
+		const normalizedStatus = status.charAt(0).toUpperCase() + status.slice(1);
+		switch (normalizedStatus) {
 			case 'NotStarted':
+			case 'Notstarted': // Handle "notStarted" -> "NotStarted"
 				return 'text-gray-500';
 			case 'InProgress':
+			case 'Inprogress': // Handle "inProgress" -> "InProgress"
 				return 'text-blue-600';
 			case 'Completed':
 				return 'text-green-600';
@@ -88,13 +96,13 @@
 						class="mt-0.5 {getStatusIconClass(taskInfo.task.status)}"
 						aria-label="Task status: {taskInfo.task.status}"
 					>
-						{#if taskInfo.task.status === 'NotStarted'}
+						{#if taskInfo.task.status === 'NotStarted' || taskInfo.task.status === 'notStarted'}
 							<Square size={taskInfo.iconSize} />
-						{:else if taskInfo.task.status === 'InProgress'}
+						{:else if taskInfo.task.status === 'InProgress' || taskInfo.task.status === 'inProgress'}
 							<SquareDot size={taskInfo.iconSize} />
-						{:else if taskInfo.task.status === 'Completed'}
+						{:else if taskInfo.task.status === 'Completed' || taskInfo.task.status === 'completed'}
 							<SquareCheck size={taskInfo.iconSize} />
-						{:else if taskInfo.task.status === 'Removed'}
+						{:else if taskInfo.task.status === 'Removed' || taskInfo.task.status === 'removed'}
 							<SquareX size={taskInfo.iconSize} />
 						{:else}
 							<Square size={taskInfo.iconSize} />
