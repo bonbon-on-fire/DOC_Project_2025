@@ -55,7 +55,7 @@ public class TaskManagerServiceTests
         var taskState = new ChatTaskState
         {
             ChatId = chatId,
-            Tasks = savedTasks,
+            TaskManager = savedTasks,
             Version = 1,
             LastUpdatedUtc = DateTime.UtcNow
         };
@@ -81,7 +81,7 @@ public class TaskManagerServiceTests
         var newState = new ChatTaskState
         {
             ChatId = chatId,
-            Tasks = JsonDocument.Parse("{}").RootElement,
+            TaskManager = JsonDocument.Parse("{}").RootElement,
             Version = 1,
             LastUpdatedUtc = DateTime.UtcNow
         };

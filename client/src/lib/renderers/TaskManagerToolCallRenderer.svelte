@@ -1,5 +1,5 @@
 <script lang="ts">
-	import CollapsibleMessageRenderer from './CollapsibleMessageRenderer.svelte';
+	import CollapsibleMessageRenderer from '../components/CollapsibleMessageRenderer.svelte';
 	import TaskListDisplay from '$lib/components/TaskListDisplay.svelte';
 	import type { RichMessageDto } from '$shared/types';
 	import type { TaskItem } from '$shared/types/tasks';

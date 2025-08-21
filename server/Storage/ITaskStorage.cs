@@ -1,11 +1,9 @@
-using System.Text.Json;
-
 namespace AIChat.Server.Storage;
 
 public record ChatTaskState
 {
     public required string ChatId { get; init; }
-    public required JsonElement Tasks { get; init; }
+    public required TaskManager TaskManager { get; init; }
     public required int Version { get; init; }
     public required DateTime LastUpdatedUtc { get; init; }
 }
@@ -29,7 +27,7 @@ public interface ITaskStorage
     /// <param name="ct">Cancellation token</param>
     /// <returns>The updated task state with new version</returns>
     /// <exception cref="InvalidOperationException">Thrown when version conflict occurs</exception>
-    Task<ChatTaskState> SaveTasksAsync(string chatId, JsonElement tasks, int expectedVersion, CancellationToken ct = default);
+    Task<ChatTaskState> SaveTasksAsync(string chatId, TaskManager taskManager, int expectedVersion, CancellationToken ct = default);
 
     /// <summary>
     /// Deletes all tasks for a specific chat.

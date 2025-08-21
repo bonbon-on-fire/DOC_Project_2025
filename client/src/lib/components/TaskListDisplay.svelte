@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { TaskItem } from '$shared/types/tasks';
+	import { Square, SquareDot, SquareCheck, SquareX } from 'lucide-svelte';
 
 	interface Props {
 		tasks: TaskItem[];
@@ -9,24 +10,24 @@
 
 	let { tasks = [], variant = 'full', maxHeight = 'none' }: Props = $props();
 
-	// Get status icon based on task status
-	function getStatusIcon(status: string): string {
+	// Get status color class for icons
+	function getStatusIconClass(status: string): string {
 		switch (status) {
 			case 'NotStarted':
-				return '□';
+				return 'text-gray-500';
 			case 'InProgress':
-				return '◻';
+				return 'text-blue-600';
 			case 'Completed':
-				return '☑';
+				return 'text-green-600';
 			case 'Removed':
-				return '☒';
+				return 'text-red-500';
 			default:
-				return '□';
+				return 'text-gray-500';
 		}
 	}
 
-	// Get status color class
-	function getStatusClass(status: string): string {
+	// Get status color class for text
+	function getStatusTextClass(status: string): string {
 		switch (status) {
 			case 'NotStarted':
 				return 'text-gray-500';
@@ -46,7 +47,9 @@
 		const hasSubtasks = task.subtasks && task.subtasks.length > 0;
 		const hasNotes = task.notes && task.notes.length > 0;
 		const indent = depth * 20;
-		return { task, hasSubtasks, hasNotes, indent, depth };
+		// Icon size decreases with depth: 18px for main, 16px for subtasks, 14px for deeper
+		const iconSize = Math.max(14, 18 - depth * 2);
+		return { task, hasSubtasks, hasNotes, indent, depth, iconSize };
 	}
 
 	// Flatten tasks for rendering
@@ -81,14 +84,29 @@
 					class="flex items-start gap-2 rounded py-1 hover:bg-gray-50 dark:hover:bg-gray-800"
 					style="padding-left: {taskInfo.indent}px"
 				>
-					<span class="mt-0.5 font-mono {getStatusClass(taskInfo.task.status)}">
-						{getStatusIcon(taskInfo.task.status)}
-					</span>
+					<div
+						class="mt-0.5 {getStatusIconClass(taskInfo.task.status)}"
+						aria-label="Task status: {taskInfo.task.status}"
+					>
+						{#if taskInfo.task.status === 'NotStarted'}
+							<Square size={taskInfo.iconSize} />
+						{:else if taskInfo.task.status === 'InProgress'}
+							<SquareDot size={taskInfo.iconSize} />
+						{:else if taskInfo.task.status === 'Completed'}
+							<SquareCheck size={taskInfo.iconSize} />
+						{:else if taskInfo.task.status === 'Removed'}
+							<SquareX size={taskInfo.iconSize} />
+						{:else}
+							<Square size={taskInfo.iconSize} />
+						{/if}
+					</div>
 					<div class="min-w-0 flex-1">
 						<span
-							class="{getStatusClass(taskInfo.task.status)} {variant === 'compact'
+							class="{getStatusTextClass(taskInfo.task.status)} {variant === 'compact'
 								? 'text-sm'
-								: ''}"
+								: taskInfo.depth === 0
+									? 'text-base font-medium'
+									: 'text-sm'}"
 						>
 							{taskInfo.task.title}
 						</span>

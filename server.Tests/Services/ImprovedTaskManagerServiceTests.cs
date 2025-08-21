@@ -56,7 +56,7 @@ public class ImprovedTaskManagerServiceTests
         var savedTaskState = new ChatTaskState
         {
             ChatId = chatId,
-            Tasks = JsonDocument.Parse("{}").RootElement,
+            TaskManager = JsonDocument.Parse("{}").RootElement,
             Version = 1,
             LastUpdatedUtc = DateTime.UtcNow
         };
@@ -125,7 +125,7 @@ public class ImprovedTaskManagerServiceTests
         var existingTaskState = new ChatTaskState
         {
             ChatId = chatId,
-            Tasks = taskElement,
+            TaskManager = taskElement,
             Version = 1,
             LastUpdatedUtc = DateTime.UtcNow
         };
@@ -214,5 +214,86 @@ public class ImprovedTaskManagerServiceTests
         
         markdown2.Should().Contain("Task for Chat 2");
         markdown2.Should().NotContain("Task for Chat 1");
+    }
+
+    [Fact]
+    public async Task ParseTasksFromMarkdown_HandlesInProgressTasksCorrectly()
+    {
+        // Arrange
+        var chatId = "test-chat-inprogress";
+        _taskStorageMock.Setup(x => x.GetTasksAsync(chatId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatTaskState?)null);
+
+        // Create a task manager and add tasks with different statuses
+        var taskManager = await _service.GetTaskManagerAsync(chatId);
+        taskManager.AddTask("Not Started Task");
+        taskManager.AddTask("In Progress Task");
+        taskManager.AddTask("Completed Task");
+        
+        // Update task statuses to test all status symbols
+        taskManager.UpdateTask(2, null, "in progress");  // Should become [-]
+        taskManager.UpdateTask(3, null, "completed");    // Should become [x]
+
+        // Simulate save and reload cycle to test parsing
+        var savedTaskState = new ChatTaskState
+        {
+            ChatId = chatId,
+            TaskManager = JsonDocument.Parse("{}").RootElement,
+            Version = 1,
+            LastUpdatedUtc = DateTime.UtcNow
+        };
+
+        _taskStorageMock.Setup(x => x.SaveTasksAsync(
+                chatId,
+                It.IsAny<JsonElement>(),
+                0,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(savedTaskState);
+
+        // Act - Save and then get the task state
+        await _service.SaveTaskManagerStateAsync(chatId);
+        var taskState = await _service.GetTaskStateAsync(chatId);
+
+        // Assert
+        taskState.Should().NotBeNull();
+        
+        // Check markdown contains all tasks 
+        var markdown = taskState.Value.GetProperty("markdown").GetString();
+        markdown.Should().Contain("Not Started Task");
+        markdown.Should().Contain("In Progress Task");
+        markdown.Should().Contain("Completed Task");
+        
+        // Most importantly, verify that [-] symbol is present (our fix working)
+        markdown.Should().Contain("[-]", "InProgress symbol should be present in markdown");
+        
+        // Check tasks array contains all tasks with correct statuses
+        var tasksArray = taskState.Value.GetProperty("tasks");
+        tasksArray.GetArrayLength().Should().Be(3);
+        
+        // Find any task with InProgress status in the parsed array (the core fix)
+        var inProgressTaskFound = false;
+        var taskStatuses = new List<string>();
+        
+        for (int i = 0; i < tasksArray.GetArrayLength(); i++)
+        {
+            var task = tasksArray[i];
+            var status = task.GetProperty("Status").GetString();
+            var title = task.GetProperty("Title").GetString();
+            taskStatuses.Add($"{title}: {status}");
+            
+            if (status == "InProgress")
+            {
+                inProgressTaskFound = true;
+            }
+        }
+        
+        // Debug info for troubleshooting
+        var statusInfo = string.Join("; ", taskStatuses);
+        
+        inProgressTaskFound.Should().BeTrue($"At least one InProgress task should be correctly parsed and included in tasks array. Found statuses: {statusInfo}");
+        
+        // Check task count matches
+        var taskCount = taskState.Value.GetProperty("taskCount").GetInt32();
+        taskCount.Should().Be(3, "All three tasks should be counted");
     }
 }

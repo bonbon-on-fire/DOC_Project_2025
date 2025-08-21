@@ -116,15 +116,60 @@ function createTaskManagerStore() {
 		return null;
 	}
 
+	// Helper to normalize task data from SSE (converts C# PascalCase to JavaScript camelCase)
+	function normalizeTaskFromSSE(task: any): TaskItem {
+		return {
+			id: typeof task.Id === 'string' ? parseInt(task.Id, 10) : task.Id || task.id,
+			title: (task.Title || task.title || '').replace(/\r/g, '').trim(),
+			status: task.Status || task.status,
+			parentId:
+				typeof task.ParentId === 'string'
+					? parseInt(task.ParentId, 10)
+					: task.ParentId || task.parentId,
+			// Handle various casings: Subtasks, subtasks, subTasks
+			subtasks:
+				task.Subtasks || task.subtasks || task.subTasks
+					? (task.Subtasks || task.subtasks || task.subTasks).map(normalizeTaskFromSSE)
+					: [],
+			notes: task.Notes || task.notes || []
+		};
+	}
+
 	return {
 		subscribe,
 
 		// Initialize tasks for a chat (from initial chat data or SSE updates)
-		initializeTasks: (chatId: string, tasks?: TaskItem[]) => {
+		initializeTasks: (chatId: string, tasks?: TaskItem[] | any) => {
 			update((state) => {
+				// Handle various input formats
+				let taskItems: TaskItem[] = [];
+
+				if (tasks) {
+					if (Array.isArray(tasks)) {
+						taskItems = tasks;
+					} else if (typeof tasks === 'object') {
+						// Handle case where tasks might be wrapped in an object
+						if (tasks.tasks && Array.isArray(tasks.tasks)) {
+							taskItems = tasks.tasks;
+						} else if (tasks.value && Array.isArray(tasks.value)) {
+							// Handle JsonElement format from server
+							taskItems = tasks.value;
+						} else {
+							// Try to extract array from object values
+							const values = Object.values(tasks);
+							if (values.length > 0 && Array.isArray(values[0])) {
+								taskItems = values[0] as TaskItem[];
+							}
+						}
+					}
+				}
+
+				// Normalize task field names from C# PascalCase to JavaScript camelCase
+				taskItems = taskItems.map(normalizeTaskFromSSE);
+
 				const taskState: ChatTaskState = {
 					chatId,
-					tasks: tasks || [],
+					tasks: taskItems,
 					version: 0,
 					lastUpdatedUtc: new Date().toISOString()
 				};
@@ -132,12 +177,13 @@ function createTaskManagerStore() {
 				// Calculate next ID based on existing tasks
 				let maxId = 0;
 				const findMaxId = (taskList: TaskItem[]) => {
+					if (!taskList || !Array.isArray(taskList)) return;
 					for (const task of taskList) {
 						if (task.id > maxId) maxId = task.id;
 						if (task.subtasks) findMaxId(task.subtasks);
 					}
 				};
-				if (tasks) findMaxId(tasks);
+				findMaxId(taskItems);
 
 				state.tasks.set(chatId, taskState);
 				state.nextIds.set(chatId, maxId + 1);
@@ -707,20 +753,43 @@ function createTaskManagerStore() {
 				// Parse tasks from the SSE payload (could be JsonElement or parsed array)
 				let tasks: TaskItem[] = [];
 
-				if (Array.isArray(taskState)) {
-					tasks = taskState;
-				} else if (taskState && typeof taskState === 'object') {
-					// Handle case where taskState might be wrapped or in a different format
-					if (taskState.tasks) {
-						tasks = taskState.tasks;
-					} else if (taskState.value) {
-						// Handle JsonElement format
-						tasks = taskState.value;
-					} else {
-						// Assume the object itself is the task array
-						tasks = Object.values(taskState);
+				if (taskState) {
+					if (Array.isArray(taskState)) {
+						tasks = taskState;
+					} else if (typeof taskState === 'object') {
+						// Handle case where taskState might be wrapped or in a different format
+						if (taskState.tasks && Array.isArray(taskState.tasks)) {
+							tasks = taskState.tasks;
+						} else if (taskState.value) {
+							// Handle JsonElement format
+							if (Array.isArray(taskState.value)) {
+								tasks = taskState.value;
+							} else if (typeof taskState.value === 'string') {
+								// Try to parse if it's a JSON string
+								try {
+									const parsed = JSON.parse(taskState.value);
+									if (Array.isArray(parsed)) {
+										tasks = parsed;
+									}
+								} catch {
+									// Ignore parse errors
+								}
+							}
+						} else if (taskState.Tasks && Array.isArray(taskState.Tasks)) {
+							// Handle capitalized property name from C#
+							tasks = taskState.Tasks;
+						} else {
+							// Try to extract array from object values
+							const values = Object.values(taskState);
+							if (values.length > 0 && Array.isArray(values[0])) {
+								tasks = values[0] as TaskItem[];
+							}
+						}
 					}
 				}
+
+				// Normalize task field names from C# PascalCase to JavaScript camelCase
+				tasks = tasks.map(normalizeTaskFromSSE);
 
 				const existing = state.tasks.get(chatId);
 				const chatTaskState: ChatTaskState = {
@@ -734,6 +803,7 @@ function createTaskManagerStore() {
 				// Update next ID counter
 				let maxId = 0;
 				const findMaxId = (taskList: TaskItem[]) => {
+					if (!taskList || !Array.isArray(taskList)) return;
 					for (const task of taskList) {
 						if (task.id > maxId) maxId = task.id;
 						if (task.subtasks) findMaxId(task.subtasks);

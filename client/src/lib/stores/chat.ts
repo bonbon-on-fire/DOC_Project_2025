@@ -105,11 +105,9 @@ export const chatActions = {
 			// Load chat data with all messages
 			const chat = await apiClient.getChat(chatId);
 
-			// Initialize tasks if present
-			if (chat.tasks) {
-				const { taskManager } = await import('./taskManager');
-				taskManager.initializeTasks(chatId, chat.tasks);
-			}
+			// Always initialize task manager for the chat (with empty tasks if none exist)
+			const { taskManager } = await import('./taskManager');
+			taskManager.initializeTasks(chatId, chat.tasks || []);
 
 			// Log tool call messages for debugging
 			const toolCallMessages = chat.messages.filter(

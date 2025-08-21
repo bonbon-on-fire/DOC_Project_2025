@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import { ChevronDown, ChevronRight, ClipboardList, RefreshCw } from 'lucide-svelte';
+	import { onMount } from 'svelte';
+	import { ChevronDown, ChevronRight, ClipboardList } from 'lucide-svelte';
 	import TaskListDisplay from './TaskListDisplay.svelte';
 	import { taskManager, currentChatTasks, taskStats } from '$lib/stores/taskManager';
 	import type { ChatTaskState } from '$shared/types/tasks';
@@ -12,8 +12,6 @@
 	let { chatId }: Props = $props();
 
 	let isExpanded = $state(false);
-	let isLoading = $state(false);
-	let error = $state<string | null>(null);
 
 	// Load persisted expansion state
 	onMount(() => {
@@ -22,9 +20,9 @@
 			isExpanded = stored === 'true';
 		}
 
-		// Load tasks for this chat if not already loaded
-		if (chatId && !$currentChatTasks) {
-			loadTasks();
+		// Set active chat when mounted
+		if (chatId) {
+			taskManager.setActiveChat(chatId);
 		}
 	});
 
@@ -33,26 +31,12 @@
 		localStorage.setItem('taskTrackerExpanded', String(isExpanded));
 	});
 
-	// Reload tasks when chat changes
+	// Update active chat when chat changes
 	$effect(() => {
 		if (chatId) {
 			taskManager.setActiveChat(chatId);
-			loadTasks();
 		}
 	});
-
-	async function loadTasks() {
-		isLoading = true;
-		error = null;
-		try {
-			await taskManager.loadTasks(chatId);
-		} catch (e) {
-			error = 'Failed to load tasks';
-			console.error('Error loading tasks:', e);
-		} finally {
-			isLoading = false;
-		}
-	}
 
 	function toggleExpanded() {
 		isExpanded = !isExpanded;
@@ -96,15 +80,6 @@
 					<span class="text-sm text-gray-600 dark:text-gray-400">
 						({getStatusSummary()})
 					</span>
-				{/if}
-			</div>
-
-			<div class="flex items-center gap-2">
-				{#if isLoading}
-					<RefreshCw size={14} class="animate-spin text-gray-500" />
-				{/if}
-				{#if error}
-					<span class="text-xs text-red-500">{error}</span>
 				{/if}
 			</div>
 		</button>

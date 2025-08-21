@@ -1,6 +1,3 @@
-using System.Text.Json.Serialization;
-using AchieveAi.LmDotnetTools.LmCore.Messages;
-
 namespace AIChat.Server.Models.SSE;
 
 /// <summary>
@@ -128,7 +125,7 @@ public class ToolResultStreamChunkPayload : StreamChunkPayload
 public class TaskUpdateStreamChunkPayload : StreamChunkPayload
 {
     [JsonPropertyName("taskState")]
-    public required System.Text.Json.JsonElement TaskState { get; set; }
+    public required IList<TaskItem> TaskState { get; set; }
     
     [JsonPropertyName("operationType")]
     public required string OperationType { get; set; }

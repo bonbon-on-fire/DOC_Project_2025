@@ -506,6 +506,11 @@ export class SlimChatSyncManager implements HandlerEventListener {
 			this.currentChatStore.set(newChat);
 			this.chatsStore.update((list) => [newChat, ...list.filter((c) => c.id !== newChat.id)]);
 
+			// Initialize task manager for the new chat
+			import('../stores/taskManager').then(({ taskManager }) => {
+				taskManager.initializeTasks(event.chatId, []);
+			});
+
 			// Ensure the new chat is selected - update currentChatId store as well
 			this.updateCurrentChatSelection(event.chatId);
 		} else {

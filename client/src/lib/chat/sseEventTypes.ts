@@ -316,6 +316,7 @@ export namespace SSEEventGuards {
 		// Check for different types of streaming chunks:
 		// - Text/reasoning chunks have 'delta' property
 		// - Tool call updates have 'toolCallUpdate' property
+		// - Task updates have 'taskState' property
 		return (
 			typeof payload === 'object' &&
 			payload != null &&
@@ -325,7 +326,9 @@ export namespace SSEEventGuards {
 				// Tool call update chunk
 				'toolCallUpdate' in payload ||
 				// Tool result chunk
-				'toolCallId' in payload)
+				'toolCallId' in payload ||
+				// Task update chunk
+				('taskState' in payload && 'operationType' in payload))
 		);
 	}
 

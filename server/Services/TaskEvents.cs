@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace AIChat.Server.Services;
 
 /// <summary>
@@ -10,7 +8,7 @@ public record TaskUpdateStreamEvent : StreamChunkEvent
     /// <summary>
     /// The current state of all tasks in the chat
     /// </summary>
-    public required JsonElement TaskState { get; set; }
+    public required IList<TaskItem> TaskState { get; set; }
     
     /// <summary>
     /// The type of operation that triggered this update

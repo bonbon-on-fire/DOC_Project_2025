@@ -1,9 +1,3 @@
-using AchieveAi.LmDotnetTools.LmCore.Core;
-using AchieveAi.LmDotnetTools.LmCore.Messages;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.Json.Serialization.Metadata;
-
 namespace AIChat.Server.Services;
 
 public interface IChatService
@@ -298,7 +292,7 @@ public record ChatDto
     public List<MessageDto> Messages { get; init; } = new();
     
     [JsonPropertyName("tasks")]
-    public System.Text.Json.JsonElement? Tasks { get; init; }
+    public IList<TaskItem>? Tasks { get; init; }
 }
 
 // Enable polymorphic serialization so derived message content (text/reasoning) is included in JSON

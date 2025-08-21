@@ -1,6 +1,3 @@
-using System.Text.Json;
-using Microsoft.Data.Sqlite;
-
 namespace AIChat.Server.Storage.Sqlite;
 
 public sealed class SqliteTaskStorage : ITaskStorage
@@ -12,7 +9,7 @@ public sealed class SqliteTaskStorage : ITaskStorage
         _factory = factory;
     }
 
-    public async Task<ChatTaskState?> GetTasksAsync(string chatId, CancellationToken ct = default)
+    public async Task<(TaskManager, int, DateTime)?> GetTasksManagerAsync(string chatId, CancellationToken ct = default)
     {
         await using var conn = await _factory.CreateOpenConnectionAsync(ct);
         const string sql = @"
@@ -29,25 +26,35 @@ public sealed class SqliteTaskStorage : ITaskStorage
         if (await reader.ReadAsync(ct))
         {
             var taskDataJson = reader.GetString(1);
-            var tasks = JsonDocument.Parse(taskDataJson).RootElement;
-            
+            return (TaskManager.DeserializeTasks(taskDataJson), reader.GetInt32(2), reader.GetDateTime(3));
+        }
+
+        return null;
+    }
+
+    public async Task<ChatTaskState?> GetTasksAsync(string chatId, CancellationToken ct = default)
+    {
+        var tup = await GetTasksManagerAsync(chatId, ct);
+        if (tup != null)
+        {
+            var (taskManager, version, lastUpdated) = tup.Value;
             return new ChatTaskState
             {
-                ChatId = reader.GetString(0),
-                Tasks = tasks,
-                Version = reader.GetInt32(2),
-                LastUpdatedUtc = DateTime.Parse(reader.GetString(3))
+                ChatId = chatId,
+                TaskManager = taskManager,
+                Version = version,
+                LastUpdatedUtc = lastUpdated
             };
         }
 
         return null;
     }
 
-    public async Task<ChatTaskState> SaveTasksAsync(string chatId, JsonElement tasks, int expectedVersion, CancellationToken ct = default)
+    public async Task<ChatTaskState> SaveTasksAsync(string chatId, TaskManager taskManager, int expectedVersion, CancellationToken ct = default)
     {
         await using var conn = await _factory.CreateOpenConnectionAsync(ct);
         var nowUtc = DateTime.UtcNow;
-        var taskDataJson = tasks.GetRawText();
+        var taskDataJson = taskManager.JsonSerializeTasks();
 
         // First, try to update existing record with version check
         const string updateSql = @"
@@ -66,14 +73,14 @@ public sealed class SqliteTaskStorage : ITaskStorage
             cmd.Parameters.AddWithValue("$expectedVersion", expectedVersion);
 
             var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
-            
+
             if (rowsAffected > 0)
             {
                 // Update succeeded, return new state
                 return new ChatTaskState
                 {
                     ChatId = chatId,
-                    Tasks = tasks,
+                    TaskManager = taskManager,
                     Version = expectedVersion + 1,
                     LastUpdatedUtc = nowUtc
                 };
@@ -91,9 +98,9 @@ public sealed class SqliteTaskStorage : ITaskStorage
         {
             cmd.CommandText = checkSql;
             cmd.Parameters.AddWithValue("$chatId", chatId);
-            
+
             var result = await cmd.ExecuteScalarAsync(ct);
-            
+
             if (result != null)
             {
                 // Record exists but version doesn't match
@@ -126,7 +133,7 @@ public sealed class SqliteTaskStorage : ITaskStorage
         return new ChatTaskState
         {
             ChatId = chatId,
-            Tasks = tasks,
+            TaskManager = taskManager,
             Version = 1,
             LastUpdatedUtc = nowUtc
         };

@@ -1,9 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
-using Lib.AspNetCore.ServerSentEvents;
-using AIChat.Server.Services;
-using AIChat.Server.Extensions;
-using AIChat.Server.Storage;
-using System.Text.Json;
 using ChatDto = AIChat.Server.Services.ChatDto;
 
 namespace AIChat.Server.Controllers;
@@ -136,7 +130,7 @@ public class ChatController : ControllerBase
             return Ok(new GetTasksResponse
             {
                 ChatId = chatId,
-                Tasks = JsonDocument.Parse("[]").RootElement,
+                Tasks = new List<TaskManager.TaskItem>(),
                 Version = 0
             });
         }
@@ -144,7 +138,7 @@ public class ChatController : ControllerBase
         return Ok(new GetTasksResponse
         {
             ChatId = taskState.ChatId,
-            Tasks = taskState.Tasks,
+            Tasks = taskState.TaskManager.GetTasks(),
             Version = taskState.Version
         });
     }
@@ -290,7 +284,7 @@ public class ChatHistoryResponse
 public class GetTasksResponse
 {
     public required string ChatId { get; set; }
-    public required JsonElement Tasks { get; set; }
+    public required IList<TaskManager.TaskItem> Tasks { get; set; } = new List<TaskManager.TaskItem>();
     public required int Version { get; set; }
 }
 

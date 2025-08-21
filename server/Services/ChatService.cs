@@ -1,16 +1,3 @@
-using AchieveAi.LmDotnetTools.LmCore.Agents;
-using AchieveAi.LmDotnetTools.LmCore.Messages;
-using System.Collections.Immutable;
-using System.Runtime.CompilerServices;
-using Microsoft.Extensions.Options;
-using AIChat.Server.Storage;
-using System.Collections.Concurrent;
-using System.Text.Json;
-using AIChat.Server.Models;
-using AchieveAi.LmDotnetTools.LmCore.Middleware;
-using AIChat.Server.Functions;
-using AchieveAi.LmDotnetTools.Misc.Utils;
-
 namespace AIChat.Server.Services;
 
 public class ChatService : IChatService, IToolResultCallback
@@ -37,42 +24,42 @@ public class ChatService : IChatService, IToolResultCallback
         _taskManagerService = taskManagerService;
         _serviceProvider = serviceProvider;
     }
-    
+
     private async Task<FunctionCallMiddleware?> CreateChatSpecificFunctionCallMiddleware(string chatId)
     {
         try
         {
             _logger.LogInformation("Creating chat-specific FunctionCallMiddleware for chat {ChatId}", chatId);
-            
+
             // Create function registry
             var registry = new FunctionRegistry();
-            
+
             // Add weather function provider
             var weatherLogger = _serviceProvider.GetRequiredService<ILogger<WeatherFunction>>();
             var weatherProvider = new WeatherFunction(weatherLogger);
             registry.AddProvider(weatherProvider);
             _logger.LogInformation("Added WeatherFunction provider to registry");
-            
+
             // Get or create TaskManager for this specific chat
             var taskManager = await _taskManagerService.GetTaskManagerAsync(chatId);
             registry.AddFunctionsFromObject(taskManager, "TaskManager");
             _logger.LogInformation("Added TaskManager functions for chat {ChatId}", chatId);
-            
+
             // Build function contracts and handlers
             var (contracts, handlers) = registry.Build();
-            
+
             if (!contracts.Any())
             {
                 _logger.LogWarning("No functions registered for FunctionCallMiddleware");
                 return null;
             }
-            
+
             _logger.LogInformation("Registered {Count} functions for tool calling in chat {ChatId}", contracts.Count(), chatId);
             foreach (var contract in contracts)
             {
                 _logger.LogInformation("Registered function: {Name} - {Description}", contract.Name, contract.Description);
             }
-            
+
             // Create middleware with callback
             var middlewareLogger = _serviceProvider.GetRequiredService<ILogger<FunctionCallMiddleware>>();
             var middleware = new FunctionCallMiddleware(
@@ -81,8 +68,8 @@ public class ChatService : IChatService, IToolResultCallback
                 name: "FunctionCall",
                 logger: middlewareLogger,
                 resultCallback: this); // Use this ChatService as the IToolResultCallback
-            
-            _logger.LogInformation("FunctionCallMiddleware created successfully for chat {ChatId}", chatId);    
+
+            _logger.LogInformation("FunctionCallMiddleware created successfully for chat {ChatId}", chatId);
             return middleware;
         }
         catch (Exception ex)
@@ -245,7 +232,7 @@ public class ChatService : IChatService, IToolResultCallback
                 : [];
 
             // Get task snapshot from TaskManagerService
-            JsonElement? taskSnapshot = await _taskManagerService.GetTaskStateAsync(chatId, CancellationToken.None);
+            var taskSnapshot = await _taskManagerService.GetTaskStateAsync(chatId, CancellationToken.None);
             
             return new ChatResult
             {
@@ -258,7 +245,7 @@ public class ChatService : IChatService, IToolResultCallback
                     Messages = messages,
                     CreatedAt = chat.Chat.CreatedAtUtc,
                     UpdatedAt = chat.Chat.UpdatedAtUtc,
-                    Tasks = taskSnapshot
+                    Tasks = taskSnapshot?.Item2
                 }
             };
         }
@@ -1331,7 +1318,7 @@ public class ChatService : IChatService, IToolResultCallback
                         Done = true,
                         SequenceNumber = _nextSequence++,
                         ChunkSequenceId = 0,
-                        TaskState = taskState.Value,
+                        TaskState = taskState?.Item2 ?? Array.Empty<TaskItem>(),
                         OperationType = "sync"
                     });
                 }
