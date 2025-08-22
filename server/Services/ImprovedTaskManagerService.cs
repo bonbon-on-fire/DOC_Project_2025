@@ -159,6 +159,4 @@ public class ImprovedTaskManagerService : ITaskManagerService
         
         return registry;
     }
-
-    Task<(string, IList<TaskManager.TaskItem>)?> ITaskManagerService.GetTaskStateAsync(string chatId, CancellationToken ct) => throw new NotImplementedException();
 }

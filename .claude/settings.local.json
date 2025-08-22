@@ -53,7 +53,8 @@
       "Bash(dotnet add package Moq)",
       "Bash(csc:*)",
       "Bash(test-fix.exe)",
-      "WebFetch(domain:lucide.dev)"
+      "WebFetch(domain:lucide.dev)",
+      "Bash(dotnet script:*)"
     ],
     "deny": [],
     "ask": [],

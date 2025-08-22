@@ -1,4 +1,5 @@
 using AchieveAi.LmDotnetTools.Misc.Utils;
+using AIChat.Server.Extensions;
 using AIChat.Server.Services;
 using AIChat.Server.Storage;
 using Lib.AspNetCore.ServerSentEvents;

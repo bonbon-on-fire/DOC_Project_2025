@@ -1,6 +1,7 @@
 using Xunit;
 using Microsoft.Extensions.Logging;
 using Moq;
+using AchieveAi.LmDotnetTools.Misc.Utils;
 using AIChat.Server.Services;
 using AIChat.Server.Storage;
 using System.Text.Json;
@@ -44,18 +45,14 @@ public class TaskManagerServiceTests
     {
         // Arrange
         var chatId = "test-chat-2";
-        var savedTasks = JsonDocument.Parse(@"{
-            ""tasks"": [
-                {""id"": ""1"", ""title"": ""Test Task"", ""status"": ""NotStarted"", ""subtasks"": [], ""notes"": []}
-            ],
-            ""markdown"": ""## 📋 Task List\n- [ ] 1. Test Task"",
-            ""timestamp"": ""2025-01-01T00:00:00Z""
-        }").RootElement;
+        // Create a TaskManager with a test task
+        var savedTaskManager = new TaskManager();
+        savedTaskManager.AddTask("Test Task");
 
         var taskState = new ChatTaskState
         {
             ChatId = chatId,
-            TaskManager = savedTasks,
+            TaskManager = savedTaskManager,
             Version = 1,
             LastUpdatedUtc = DateTime.UtcNow
         };
@@ -81,14 +78,14 @@ public class TaskManagerServiceTests
         var newState = new ChatTaskState
         {
             ChatId = chatId,
-            TaskManager = JsonDocument.Parse("{}").RootElement,
+            TaskManager = taskManager,
             Version = 1,
             LastUpdatedUtc = DateTime.UtcNow
         };
 
         _mockTaskStorage.Setup(x => x.SaveTasksAsync(
                 chatId,
-                It.IsAny<JsonElement>(),
+                It.IsAny<TaskManager>(),
                 It.IsAny<int>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(newState);
@@ -99,7 +96,7 @@ public class TaskManagerServiceTests
         // Assert
         _mockTaskStorage.Verify(x => x.SaveTasksAsync(
             chatId,
-            It.IsAny<JsonElement>(),
+            It.IsAny<TaskManager>(),
             It.IsAny<int>(),
             It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -134,11 +131,9 @@ public class TaskManagerServiceTests
 
         // Assert
         taskState.Should().NotBeNull();
-        taskState.Value.TryGetProperty("chatId", out var chatIdProp).Should().BeTrue();
-        chatIdProp.GetString().Should().Be(chatId);
-        taskState.Value.TryGetProperty("markdown", out _).Should().BeTrue();
-        taskState.Value.TryGetProperty("tasks", out _).Should().BeTrue();
-        taskState.Value.TryGetProperty("taskCount", out _).Should().BeTrue();
+        var (markdown, tasks) = taskState.Value;
+        markdown.Should().NotBeNullOrEmpty();
+        tasks.Should().NotBeNull();
     }
 
     [Fact]

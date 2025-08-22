@@ -1,11 +1,16 @@
 using AchieveAi.LmDotnetTools.LmCore.Agents;
 using AchieveAi.LmDotnetTools.LmCore.Messages;
-using AchieveAi.LmDotnetTools.LmCore.Middleware;
-using AIChat.Server.Models;
-using AIChat.Server.Storage;
-using Microsoft.Extensions.Options;
-using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Options;
+using AIChat.Server.Storage;
+using System.Collections.Concurrent;
+using System.Text.Json;
+using AIChat.Server.Models;
+using AchieveAi.LmDotnetTools.LmCore.Middleware;
+using AIChat.Server.Functions;
+using AchieveAi.LmDotnetTools.Misc.Utils;
+using static AchieveAi.LmDotnetTools.Misc.Utils.TaskManager;
 
 namespace AIChat.Server.Services;
 
@@ -33,42 +38,42 @@ public class ChatService : IChatService, IToolResultCallback
         _taskManagerService = taskManagerService;
         _serviceProvider = serviceProvider;
     }
-
+    
     private async Task<FunctionCallMiddleware?> CreateChatSpecificFunctionCallMiddleware(string chatId)
     {
         try
         {
             _logger.LogInformation("Creating chat-specific FunctionCallMiddleware for chat {ChatId}", chatId);
-
+            
             // Create function registry
             var registry = new FunctionRegistry();
-
+            
             // Add weather function provider
             var weatherLogger = _serviceProvider.GetRequiredService<ILogger<WeatherFunction>>();
             var weatherProvider = new WeatherFunction(weatherLogger);
             registry.AddProvider(weatherProvider);
             _logger.LogInformation("Added WeatherFunction provider to registry");
-
+            
             // Get or create TaskManager for this specific chat
             var taskManager = await _taskManagerService.GetTaskManagerAsync(chatId);
             registry.AddFunctionsFromObject(taskManager, "TaskManager");
             _logger.LogInformation("Added TaskManager functions for chat {ChatId}", chatId);
-
+            
             // Build function contracts and handlers
             var (contracts, handlers) = registry.Build();
-
+            
             if (!contracts.Any())
             {
                 _logger.LogWarning("No functions registered for FunctionCallMiddleware");
                 return null;
             }
-
+            
             _logger.LogInformation("Registered {Count} functions for tool calling in chat {ChatId}", contracts.Count(), chatId);
             foreach (var contract in contracts)
             {
                 _logger.LogInformation("Registered function: {Name} - {Description}", contract.Name, contract.Description);
             }
-
+            
             // Create middleware with callback
             var middlewareLogger = _serviceProvider.GetRequiredService<ILogger<FunctionCallMiddleware>>();
             var middleware = new FunctionCallMiddleware(
@@ -77,8 +82,8 @@ public class ChatService : IChatService, IToolResultCallback
                 name: "FunctionCall",
                 logger: middlewareLogger,
                 resultCallback: this); // Use this ChatService as the IToolResultCallback
-
-            _logger.LogInformation("FunctionCallMiddleware created successfully for chat {ChatId}", chatId);
+            
+            _logger.LogInformation("FunctionCallMiddleware created successfully for chat {ChatId}", chatId);    
             return middleware;
         }
         catch (Exception ex)
@@ -546,6 +551,7 @@ public class ChatService : IChatService, IToolResultCallback
         
         _logger.LogInformation("Making API call to LLM for chat {ChatId}", chatId);
         var options = new GenerateReplyOptions { ModelId = GetModelId() };
+        var streamProcessor = ProcessStream(chatId, userMsgSequence);
 
         // Build middleware chain
         var agent = _streamingAgent
@@ -565,7 +571,7 @@ public class ChatService : IChatService, IToolResultCallback
                         context.Options,
                         cancellationToken);
 
-                    return ProcessStream(stream, chatId, userMsgSequence, cancellationToken);
+                    return streamProcessor(stream, cancellationToken);
                 }
             );
             
@@ -580,298 +586,320 @@ public class ChatService : IChatService, IToolResultCallback
         {
             _logger.LogWarning("FunctionCallMiddleware is null for chat {ChatId}, tool calls will not be processed", chatId);
         }
-        
-        var streamingResponse = await agent
-            .WithMiddleware(new MessageUpdateJoinerMiddleware())
-            .GenerateReplyStreamingAsync(
-                lmMessages,
-                options,
-                cancellationToken: cancellationToken);
 
-        _logger.LogInformation("Received response from LLM for chat {ChatId}", chatId);
-
+        bool loop = false;
+        bool hasTextMessage = false;
         int fullMessageIndex = userMsgSequence;
-        Type? lastFullMessageType = null;
-        await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
+        do
         {
-            _logger.LogInformation(
-                "[MIDDLEWARE] Message from middleware stream - Type: {MessageType}, ChatId: {ChatId}",
-                message.GetType().Name,
-                chatId);
-            
-            fullMessageIndex++;
+            loop = false;
+            var streamingResponse = await agent
+                .WithMiddleware(new MessageUpdateJoinerMiddleware())
+                .GenerateReplyStreamingAsync(
+                    lmMessages,
+                    options,
+                    cancellationToken: cancellationToken);
 
-            lastFullMessageType = message.GetType();
-            // Ensure we have a valid generation ID (test mode might not provide one)
-            var generationId = string.IsNullOrEmpty(message.GenerationId) 
-                ? $"gen-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid():N}".Substring(0, 32)
-                : message.GenerationId;
-            var fullMessageId = generationId + $"-{fullMessageIndex:D3}";
-            _currentMessageId = fullMessageId; // Track for tool result callbacks
-            
-            _logger.LogInformation(
-                "Persisting message from middleware - Type: {MessageType}, MessageId: {MessageId}, ChatId: {ChatId}",
-                message.GetType().Name,
-                fullMessageId,
-                chatId);
-            
-            var sequenceNumber = await PersistFullMessage(chatId, message, fullMessageId);
-            
-            // Skip sending encrypted reasoning messages to client (they have sequence -1)
-            if (sequenceNumber == -1)
+            _logger.LogInformation("Received response from LLM for chat {ChatId}", chatId);
+
+            Type? lastFullMessageType = null;
+            var replies = new List<IMessage>();
+            await foreach (var message in streamingResponse.WithCancellation(cancellationToken))
             {
+                replies.Add(message);
                 _logger.LogInformation(
-                    "Encrypted reasoning persisted but not sent to client - ChatId: {ChatId}, MessageId: {MessageId}",
-                    chatId, fullMessageId);
-                continue; // Skip to next message without sending to client
-            }
-            
-            if (sequenceNumber != fullMessageIndex)
-            {
-                _logger.LogError(
-                    "Sequence number mismatch: {Expected}, {Actual}",
-                    fullMessageIndex,
-                    sequenceNumber);
-            }
+                    "[MIDDLEWARE] Message from middleware stream - Type: {MessageType}, ChatId: {ChatId}",
+                    message.GetType().Name,
+                    chatId);
 
-            if (MessageReceived != null)
-            {
-                MessageEvent? evt = message switch
-                {
-                    TextMessage textMessage => new TextEvent
-                    {
-                        ChatId = chatId,
-                        MessageId = fullMessageId,
-                        Kind = "text",
-                        SequenceNumber = sequenceNumber,
-                        Text = textMessage.Text
-                    },
-                    ReasoningMessage reasoningMessage => new ReasoningEvent
-                    {
-                        ChatId = chatId,
-                        MessageId = fullMessageId,
-                        Kind = "reasoning",
-                        SequenceNumber = sequenceNumber,
-                        Reasoning = reasoningMessage.Reasoning,
-                        Visibility = reasoningMessage.Visibility
-                    },
-                    ToolsCallMessage toolsCallMessage => new ToolCallEvent
-                    {
-                        ChatId = chatId,
-                        MessageId = fullMessageId,
-                        Kind = "tools_call",
-                        SequenceNumber = sequenceNumber,
-                        ToolCalls = [.. toolsCallMessage.ToolCalls]
-                    },
-                    UsageMessage usageMessage => new UsageEvent
-                    {
-                        ChatId = chatId,
-                        MessageId = fullMessageId,
-                        Kind = "usage",
-                        SequenceNumber = sequenceNumber,
-                        Usage = usageMessage.Usage
-                    },
-                    ToolsCallAggregateMessage toolsAggregateMessage => new ToolsCallAggregateEvent
-                    {
-                        ChatId = chatId,
-                        MessageId = fullMessageId,
-                        Kind = "tools_aggregate",
-                        SequenceNumber = sequenceNumber,
-                        ToolCalls = [.. toolsAggregateMessage.ToolsCallMessage.ToolCalls],
-                        ToolResults = toolsAggregateMessage.ToolsCallResult?.ToolCallResults?.ToArray()
-                    },
-                    _ => null
-                };
+                fullMessageIndex++;
 
-                if (evt != null)
+                lastFullMessageType = message.GetType();
+                // Ensure we have a valid and unique generation ID (add time salt for cache scenarios)
+                var generationId = EnsureUniqueGenerationId(message.GenerationId, chatId);
+                var fullMessageId = generationId + $"-{fullMessageIndex:D3}";
+                _currentMessageId = fullMessageId; // Track for tool result callbacks
+
+                _logger.LogInformation(
+                    "Persisting message from middleware - Type: {MessageType}, MessageId: {MessageId}, ChatId: {ChatId}",
+                    message.GetType().Name,
+                    fullMessageId,
+                    chatId);
+
+                var sequenceNumber = await PersistFullMessage(chatId, message, fullMessageId);
+
+                // Skip sending encrypted reasoning messages to client (they have sequence -1)
+                if (sequenceNumber == -1)
                 {
-                    // Log tool call completion details and map tool calls to message IDs
-                    if (evt is ToolCallEvent toolCallEvt)
-                    {
-                        _logger.LogInformation(
-                            "Sending ToolCallEvent - ChatId: {ChatId}, MessageId: {MessageId}, ToolCount: {ToolCount}, Sequence: {Sequence}",
-                            toolCallEvt.ChatId,
-                            toolCallEvt.MessageId,
-                            toolCallEvt.ToolCalls.Length,
-                            toolCallEvt.SequenceNumber);
-                    }
-                    
-                    await MessageReceived(evt);
+                    _logger.LogInformation(
+                        "Encrypted reasoning persisted but not sent to client - ChatId: {ChatId}, MessageId: {MessageId}",
+                        chatId, fullMessageId);
+                    continue; // Skip to next message without sending to client
                 }
-            }
-        }
 
-        await _storage.UpdateChatUpdatedAtAsync(chatId, DateTime.UtcNow, cancellationToken);
+                if (sequenceNumber != fullMessageIndex)
+                {
+                    _logger.LogError(
+                        "Sequence number mismatch: {Expected}, {Actual}",
+                        fullMessageIndex,
+                        sequenceNumber);
+                }
+
+                if (MessageReceived != null)
+                {
+                    MessageEvent? evt = message switch
+                    {
+                        TextMessage textMessage => new TextEvent
+                        {
+                            ChatId = chatId,
+                            MessageId = fullMessageId,
+                            Kind = "text",
+                            SequenceNumber = sequenceNumber,
+                            Text = textMessage.Text
+                        },
+                        ReasoningMessage reasoningMessage => new ReasoningEvent
+                        {
+                            ChatId = chatId,
+                            MessageId = fullMessageId,
+                            Kind = "reasoning",
+                            SequenceNumber = sequenceNumber,
+                            Reasoning = reasoningMessage.Reasoning,
+                            Visibility = reasoningMessage.Visibility
+                        },
+                        ToolsCallMessage toolsCallMessage => new ToolCallEvent
+                        {
+                            ChatId = chatId,
+                            MessageId = fullMessageId,
+                            Kind = "tools_call",
+                            SequenceNumber = sequenceNumber,
+                            ToolCalls = [.. toolsCallMessage.ToolCalls]
+                        },
+                        UsageMessage usageMessage => new UsageEvent
+                        {
+                            ChatId = chatId,
+                            MessageId = fullMessageId,
+                            Kind = "usage",
+                            SequenceNumber = sequenceNumber,
+                            Usage = usageMessage.Usage
+                        },
+                        ToolsCallAggregateMessage toolsAggregateMessage => new ToolsCallAggregateEvent
+                        {
+                            ChatId = chatId,
+                            MessageId = fullMessageId,
+                            Kind = "tools_aggregate",
+                            SequenceNumber = sequenceNumber,
+                            ToolCalls = [.. toolsAggregateMessage.ToolsCallMessage.ToolCalls],
+                            ToolResults = toolsAggregateMessage.ToolsCallResult?.ToolCallResults?.ToArray()
+                        },
+                        _ => null
+                    };
+
+                    if (evt != null)
+                    {
+                        // Log tool call completion details and map tool calls to message IDs
+                        if (evt is ToolCallEvent toolCallEvt)
+                        {
+                            _logger.LogInformation(
+                                "Sending ToolCallEvent - ChatId: {ChatId}, MessageId: {MessageId}, ToolCount: {ToolCount}, Sequence: {Sequence}",
+                                toolCallEvt.ChatId,
+                                toolCallEvt.MessageId,
+                                toolCallEvt.ToolCalls.Length,
+                                toolCallEvt.SequenceNumber);
+                        }
+
+                        await MessageReceived(evt);
+                    }
+                }
+
+                loop = loop ||
+                    message is ToolsCallAggregateMessage;
+                hasTextMessage = hasTextMessage ||
+                    (message is TextMessage tmpTm && !string.IsNullOrWhiteSpace(tmpTm.Text));
+            }
+
+            loop = loop || !hasTextMessage;
+            await _storage.UpdateChatUpdatedAtAsync(chatId, DateTime.UtcNow, cancellationToken);
+
+            lmMessages.Add(
+                replies.Count == 1
+                ? replies[0]
+                : new CompositeMessage
+                {
+                    Messages = replies.ToImmutableList(),
+                    Role = Role.Assistant,
+                });
+        } while (loop);
     }
 
-    private async IAsyncEnumerable<IMessage> ProcessStream(
-        IAsyncEnumerable<IMessage> stream,
+    private Func<IAsyncEnumerable<IMessage>, CancellationToken, IAsyncEnumerable<IMessage>> ProcessStream(
         string chatId,
-        int userMsgSequence,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        int userMsgSequence)
     {
         int messageIndex = userMsgSequence;
         int chunkSequenceId = 0;
         Type? lastType = null;
 
-        await foreach (var message in stream.WithCancellation(cancellationToken))
+        async IAsyncEnumerable<IMessage> ProcessStreamInternal(IAsyncEnumerable<IMessage> stream, [EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            // Log every message type we receive from the stream
-            _logger.LogTrace(
-                "Received message from stream - Type: {MessageType}, ChatId: {ChatId}, MessageIndex: {MessageIndex}",
-                message.GetType().Name,
-                chatId,
-                messageIndex);
-            
-            if (message.GetType() != lastType)
+            await foreach (var message in stream.WithCancellation(cancellationToken))
             {
-                messageIndex++;
-                chunkSequenceId = 0;
-            }
-
-            chunkSequenceId++;
-
-            lastType = message.GetType();
-            // Ensure we have a valid generation ID for streaming messages too
-            var generationId = string.IsNullOrEmpty(message.GenerationId) 
-                ? $"gen-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid():N}".Substring(0, 32)
-                : message.GenerationId;
-            var messageId = generationId + $"-{messageIndex:D3}";
-
-            if (message is TextUpdateMessage textMessage)
-            {
-                var content = textMessage.Text;
-                if (!string.IsNullOrEmpty(content))
-                {
-                    _logger.LogTrace(
-                        "TextUpdateMessage - ChatId: {ChatId}, MessageId: {MessageId}, {Type}, Content: {Delta}",
-                        chatId,
-                        messageId,
-                        "text",
-                        content);
-
-                    if (StreamChunkReceived != null)
-                    {
-                        await StreamChunkReceived(
-                            new TextStreamEvent
-                            {
-                                ChatId = chatId,
-                                MessageId = messageId,
-                                Kind = "text",
-                                Done = false,
-                                Delta = content,
-                                ChunkSequenceId = chunkSequenceId,
-                                SequenceNumber = messageIndex,
-                            });
-                    }
-                }
-            }
-            else if (message is ReasoningUpdateMessage reasoningUpdate)
-            {
-                if (reasoningUpdate.Visibility == ReasoningVisibility.Encrypted) continue;
-                var delta = reasoningUpdate.Reasoning;
-                if (!string.IsNullOrEmpty(delta))
-                {
-                    _logger.LogTrace(
-                        "ReasoningUpdateMessage - ChatId: {ChatId}, MessageId: {MessageId}, {Type}, Content: {Delta}",
-                        chatId,
-                        messageId,
-                        "reasoning",
-                        delta);
-
-                    if (StreamChunkReceived != null)
-                    {
-                        await StreamChunkReceived(
-                            new ReasoningStreamEvent
-                            {
-                                ChatId = chatId,
-                                MessageId = messageId,
-                                Kind = "reasoning",
-                                Done = false,
-                                Delta = delta,
-                                ChunkSequenceId = chunkSequenceId,
-                                SequenceNumber = messageIndex,
-                                Visibility = reasoningUpdate.Visibility
-                            });
-                    }
-                }
-            }
-            else if (message is ToolsCallUpdateMessage toolsCallUpdateMessage)
-            {
-                // These are streaming chunks - just pass them through for real-time display
-                // The message joiner middleware will accumulate these into a complete ToolsCallMessage
-                int toolCallIndex = 0;
-                var toolCallCount = toolsCallUpdateMessage.ToolCallUpdates.Count();
-                
+                // Log every message type we receive from the stream
                 _logger.LogTrace(
-                    "Processing ToolsCallUpdateMessage (streaming chunk) - ChatId: {ChatId}, MessageId: {MessageId}, ToolCallCount: {ToolCallCount}, GenerationId: {GenerationId}",
+                    "Received message from stream - Type: {MessageType}, ChatId: {ChatId}, MessageIndex: {MessageIndex}",
+                    message.GetType().Name,
                     chatId,
-                    messageId,
-                    toolCallCount,
-                    generationId);
-                
-                foreach (var toolCallUpdate in toolsCallUpdateMessage.ToolCallUpdates)
+                    messageIndex);
+
+                if (message.GetType() != lastType)
                 {
-                    // Generate unique message ID for each tool call to avoid duplicate keys on client
-                    var toolCallMessageId = $"{messageId}";
-                    var toolCallSequence = messageIndex + toolCallIndex;
-                    
-                    // Map ToolCallId to MessageId and SequenceNumber when we first see it during streaming
-                    if (!string.IsNullOrEmpty(toolCallUpdate.ToolCallId))
+                    messageIndex++;
+                    chunkSequenceId = 0;
+                }
+
+                chunkSequenceId++;
+
+                lastType = message.GetType();
+                // Ensure we have a valid and unique generation ID for streaming messages too
+                var generationId = EnsureUniqueGenerationId(message.GenerationId, chatId);
+                var messageId = generationId + $"-{messageIndex:D3}";
+
+                if (message is TextUpdateMessage textMessage)
+                {
+                    var content = textMessage.Text;
+                    if (!string.IsNullOrEmpty(content))
                     {
-                        _toolCallToMessageMap.TryAdd(toolCallUpdate.ToolCallId, (toolCallMessageId, toolCallSequence));
-                        _logger.LogInformation(
-                            "Mapped ToolCallId {ToolCallId} to MessageId {MessageId} with Sequence {Sequence} during streaming",
-                            toolCallUpdate.ToolCallId,
-                            toolCallMessageId,
-                            toolCallSequence);
+                        _logger.LogTrace(
+                            "TextUpdateMessage - ChatId: {ChatId}, MessageId: {MessageId}, {Type}, Content: {Delta}",
+                            chatId,
+                            messageId,
+                            "text",
+                            content);
+
+                        if (StreamChunkReceived != null)
+                        {
+                            await StreamChunkReceived(
+                                new TextStreamEvent
+                                {
+                                    ChatId = chatId,
+                                    MessageId = messageId,
+                                    Kind = "text",
+                                    Done = false,
+                                    Delta = content,
+                                    ChunkSequenceId = chunkSequenceId,
+                                    SequenceNumber = messageIndex,
+                                });
+                        }
                     }
-                    
+                }
+                else if (message is ReasoningUpdateMessage reasoningUpdate)
+                {
+                    if (reasoningUpdate.Visibility == ReasoningVisibility.Encrypted) continue;
+                    var delta = reasoningUpdate.Reasoning;
+                    if (!string.IsNullOrEmpty(delta))
+                    {
+                        _logger.LogTrace(
+                            "ReasoningUpdateMessage - ChatId: {ChatId}, MessageId: {MessageId}, {Type}, Content: {Delta}",
+                            chatId,
+                            messageId,
+                            "reasoning",
+                            delta);
+
+                        if (StreamChunkReceived != null)
+                        {
+                            await StreamChunkReceived(
+                                new ReasoningStreamEvent
+                                {
+                                    ChatId = chatId,
+                                    MessageId = messageId,
+                                    Kind = "reasoning",
+                                    Done = false,
+                                    Delta = delta,
+                                    ChunkSequenceId = chunkSequenceId,
+                                    SequenceNumber = messageIndex,
+                                    Visibility = reasoningUpdate.Visibility
+                                });
+                        }
+                    }
+                }
+                else if (message is ToolsCallUpdateMessage toolsCallUpdateMessage)
+                {
+                    // These are streaming chunks - just pass them through for real-time display
+                    // The message joiner middleware will accumulate these into a complete ToolsCallMessage
+                    int toolCallIndex = 0;
+                    var toolCallCount = toolsCallUpdateMessage.ToolCallUpdates.Count();
+
                     _logger.LogTrace(
-                        "Streaming tool call update - Index: {Index}, FunctionName: {FunctionName}, ArgsLength: {ArgsLength}, ToolCallId: {ToolCallId}",
-                        toolCallUpdate.Index ?? toolCallIndex,
-                        toolCallUpdate.FunctionName ?? "null",
-                        toolCallUpdate.FunctionArgs?.Length ?? 0,
-                        toolCallUpdate.ToolCallId ?? "null");
-                    
-                    _logger.LogInformation(
-                        "ToolCall {ToolIndex}/{ToolCount} - ChatId: {ChatId}, MessageId: {MessageId}, Sequence: {Sequence}, ToolName: {ToolName}, ToolId: {ToolId}",
-                        toolCallIndex + 1,
+                        "Processing ToolsCallUpdateMessage (streaming chunk) - ChatId: {ChatId}, MessageId: {MessageId}, ToolCallCount: {ToolCallCount}, GenerationId: {GenerationId}",
+                        chatId,
+                        messageId,
                         toolCallCount,
-                        chatId,
-                        toolCallMessageId,
-                        toolCallSequence,
-                        toolCallUpdate.FunctionName ?? "unknown",
-                        toolCallUpdate.ToolCallId ?? $"idx_{toolCallUpdate.Index}");
-                    
-                    if (StreamChunkReceived != null)
+                        generationId);
+
+                    foreach (var toolCallUpdate in toolsCallUpdateMessage.ToolCallUpdates)
                     {
-                        await StreamChunkReceived(
-                            new ToolsCallUpdateStreamEvent
-                            {
-                                ChatId = chatId,
-                                MessageId = toolCallMessageId,
-                                Kind = "tools_call_update",
-                                Done = false,
-                                ChunkSequenceId = chunkSequenceId,
-                                SequenceNumber = toolCallSequence, // Unique sequence for each tool
-                                ToolCallUpdate = toolCallUpdate
-                            });
+                        // Generate unique message ID for each tool call to avoid duplicate keys on client
+                        var toolCallMessageId = $"{messageId}";
+                        var toolCallSequence = messageIndex + toolCallIndex;
+
+                        // Map ToolCallId to MessageId and SequenceNumber when we first see it during streaming
+                        if (!string.IsNullOrEmpty(toolCallUpdate.ToolCallId))
+                        {
+                            _toolCallToMessageMap.TryAdd(toolCallUpdate.ToolCallId, (toolCallMessageId, toolCallSequence));
+                            _logger.LogInformation(
+                                "Mapped ToolCallId {ToolCallId} to MessageId {MessageId} with Sequence {Sequence} during streaming",
+                                toolCallUpdate.ToolCallId,
+                                toolCallMessageId,
+                                toolCallSequence);
+                        }
+
+                        _logger.LogTrace(
+                            "Streaming tool call update - Index: {Index}, FunctionName: {FunctionName}, ArgsLength: {ArgsLength}, ToolCallId: {ToolCallId}",
+                            toolCallUpdate.Index ?? toolCallIndex,
+                            toolCallUpdate.FunctionName ?? "null",
+                            toolCallUpdate.FunctionArgs?.Length ?? 0,
+                            toolCallUpdate.ToolCallId ?? "null");
+
+                        _logger.LogInformation(
+                            "ToolCall {ToolIndex}/{ToolCount} - ChatId: {ChatId}, MessageId: {MessageId}, Sequence: {Sequence}, ToolName: {ToolName}, ToolId: {ToolId}",
+                            toolCallIndex + 1,
+                            toolCallCount,
+                            chatId,
+                            toolCallMessageId,
+                            toolCallSequence,
+                            toolCallUpdate.FunctionName ?? "unknown",
+                            toolCallUpdate.ToolCallId ?? $"idx_{toolCallUpdate.Index}");
+
+                        if (StreamChunkReceived != null)
+                        {
+                            await StreamChunkReceived(
+                                new ToolsCallUpdateStreamEvent
+                                {
+                                    ChatId = chatId,
+                                    MessageId = toolCallMessageId,
+                                    Kind = "tools_call_update",
+                                    Done = false,
+                                    ChunkSequenceId = chunkSequenceId,
+                                    SequenceNumber = toolCallSequence, // Unique sequence for each tool
+                                    ToolCallUpdate = toolCallUpdate
+                                });
+                        }
+                        toolCallIndex++;
                     }
-                    toolCallIndex++;
+
+                    _logger.LogTrace(
+                        "Streamed {Count} tool call updates - ChatId: {ChatId}, GenerationId: {GenerationId}",
+                        toolCallIndex,
+                        chatId,
+                        generationId);
                 }
-                
-                _logger.LogTrace(
-                    "Streamed {Count} tool call updates - ChatId: {ChatId}, GenerationId: {GenerationId}",
-                    toolCallIndex,
-                    chatId,
-                    generationId);
+
+                yield return message;
             }
 
-            yield return message;
+            yield break;
         }
 
-        yield break;
+        return ProcessStreamInternal;
     }
 
     private async Task<int> PersistFullMessage(
@@ -1424,5 +1452,41 @@ public class ChatService : IChatService, IToolResultCallback
         };
         
         return taskManagerFunctions.Any(func => functionName.EndsWith(func, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Ensures generation ID is unique by adding time-based salt if needed.
+    /// This prevents primary key conflicts when using cached LLM responses.
+    /// </summary>
+    private string EnsureUniqueGenerationId(string? providedGenerationId, string chatId)
+    {
+        // If no generation ID provided, create a new one with high precision timestamp
+        if (string.IsNullOrEmpty(providedGenerationId))
+        {
+            var timestamp = DateTimeOffset.UtcNow;
+            var microseconds = timestamp.Ticks / 10; // Convert ticks to microseconds
+            return $"gen-{timestamp.ToUnixTimeSeconds()}-{microseconds % 1000000:D6}-{Guid.NewGuid():N}".Substring(0, 32);
+        }
+
+        // If generation ID is provided (possibly from cache), add a unique suffix to ensure uniqueness
+        // Check if it already has our timestamp pattern to avoid double-salting
+        if (providedGenerationId.StartsWith("gen-") && providedGenerationId.Length >= 32)
+        {
+            // Already has our format, likely unique
+            return providedGenerationId + $"-{chatId.Substring(0, 8)}";
+        }
+
+        // Add time-based salt to the provided ID to ensure uniqueness
+        var saltedId = $"{providedGenerationId}-{DateTimeOffset.UtcNow.Ticks:X}";
+        
+        // Ensure it fits within reasonable ID length (32 chars)
+        if (saltedId.Length > 32)
+        {
+            // Take first 16 chars of original and add time-based suffix
+            var truncated = providedGenerationId.Substring(0, Math.Min(16, providedGenerationId.Length));
+            return $"{truncated}-{DateTimeOffset.UtcNow.Ticks:X}".Substring(0, 32);
+        }
+
+        return saltedId;
     }
 }

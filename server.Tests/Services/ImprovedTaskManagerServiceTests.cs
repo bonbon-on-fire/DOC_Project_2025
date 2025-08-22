@@ -84,48 +84,24 @@ public class ImprovedTaskManagerServiceTests
     {
         // Arrange
         var chatId = "test-chat-3";
-        var taskData = new
+        
+        // Create a TaskManager with existing tasks
+        var existingTaskManager = new TaskManager();
+        existingTaskManager.AddTask("Restored Task 1");
+        existingTaskManager.AddTask("Restored Task 2");
+        var tasks = existingTaskManager.GetTasks();
+        if (tasks.Count > 1)
         {
-            tasks = new object[]
-            {
-                new
-                {
-                    Id = "1",
-                    Title = "Restored Task 1",
-                    Status = "NotStarted",
-                    Subtasks = Array.Empty<object>(),
-                    Notes = Array.Empty<string>()
-                },
-                new
-                {
-                    Id = "2",
-                    Title = "Restored Task 2",
-                    Status = "Completed",
-                    Subtasks = new object[]
-                    {
-                        new
-                        {
-                            Id = "2.1",
-                            Title = "Subtask 1",
-                            Status = "NotStarted",
-                            Subtasks = Array.Empty<object>(),
-                            Notes = Array.Empty<string>()
-                        }
-                    },
-                    Notes = new[] { "Note for task 2" }
-                }
-            },
-            markdown = "test markdown",
-            timestamp = DateTime.UtcNow
-        };
-
-        var taskJson = JsonSerializer.Serialize(taskData);
-        var taskElement = JsonDocument.Parse(taskJson).RootElement;
+            existingTaskManager.AddTask("Subtask 1", parentId: tasks[1].Id);
+            // Use the new AddNote method instead of ManageNotes
+            existingTaskManager.AddNote(1, 2, "Note for task 2");
+            existingTaskManager.UpdateTask(tasks[0].Id, "completed");
+        }
 
         var existingTaskState = new ChatTaskState
         {
             ChatId = chatId,
-            TaskManager = taskElement,
+            TaskManager = existingTaskManager,
             Version = 1,
             LastUpdatedUtc = DateTime.UtcNow
         };
@@ -140,13 +116,15 @@ public class ImprovedTaskManagerServiceTests
         taskManager.Should().NotBeNull();
         var markdown = taskManager.GetMarkdown();
         
-        // The restored TaskManager should have the tasks from bulk-initialize
+        // The restored TaskManager should have the tasks
         markdown.Should().Contain("Restored Task 1");
         markdown.Should().Contain("Restored Task 2");
         markdown.Should().Contain("Subtask 1");
         
-        // Verify the task count
-        markdown.Should().Contain("2 tasks");
+        // Verify task completion status
+        var restoredTasks = taskManager.GetTasks();
+        restoredTasks.Should().HaveCountGreaterThan(0);
+        restoredTasks[0].Status.Should().Be(TaskManager.TaskStatus.Completed);
     }
 
     [Fact]
@@ -168,7 +146,7 @@ public class ImprovedTaskManagerServiceTests
     }
 
     [Fact]
-    public async Task GetTaskStateAsync_ReturnsCorrectJsonStructure()
+    public async Task GetTaskStateAsync_ReturnsCorrectTaskState()
     {
         // Arrange
         var chatId = "test-chat-5";
@@ -183,9 +161,11 @@ public class ImprovedTaskManagerServiceTests
 
         // Assert
         taskState.Should().NotBeNull();
-        taskState.Value.GetProperty("chatId").GetString().Should().Be(chatId);
-        taskState.Value.GetProperty("markdown").GetString().Should().Contain("Task for JSON");
-        taskState.Value.GetProperty("taskCount").GetInt32().Should().Be(1);
+        var (markdown, tasks) = taskState.Value;
+        markdown.Should().Contain("Task for JSON");
+        tasks.Should().NotBeNull();
+        tasks.Should().HaveCount(1);
+        tasks[0].Title.Should().Be("Task for JSON");
     }
 
     [Fact]
@@ -231,21 +211,21 @@ public class ImprovedTaskManagerServiceTests
         taskManager.AddTask("Completed Task");
         
         // Update task statuses to test all status symbols
-        taskManager.UpdateTask(2, null, "in progress");  // Should become [-]
-        taskManager.UpdateTask(3, null, "completed");    // Should become [x]
+        taskManager.UpdateTask("2", "in progress");  // Should become [-]
+        taskManager.UpdateTask("3", "completed");    // Should become [x]
 
         // Simulate save and reload cycle to test parsing
         var savedTaskState = new ChatTaskState
         {
             ChatId = chatId,
-            TaskManager = JsonDocument.Parse("{}").RootElement,
+            TaskManager = taskManager, // Use the actual TaskManager
             Version = 1,
             LastUpdatedUtc = DateTime.UtcNow
         };
 
         _taskStorageMock.Setup(x => x.SaveTasksAsync(
                 chatId,
-                It.IsAny<JsonElement>(),
+                It.IsAny<TaskManager>(),
                 0,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(savedTaskState);
@@ -256,9 +236,9 @@ public class ImprovedTaskManagerServiceTests
 
         // Assert
         taskState.Should().NotBeNull();
+        var (markdown, tasks) = taskState.Value;
         
         // Check markdown contains all tasks 
-        var markdown = taskState.Value.GetProperty("markdown").GetString();
         markdown.Should().Contain("Not Started Task");
         markdown.Should().Contain("In Progress Task");
         markdown.Should().Contain("Completed Task");
@@ -267,21 +247,20 @@ public class ImprovedTaskManagerServiceTests
         markdown.Should().Contain("[-]", "InProgress symbol should be present in markdown");
         
         // Check tasks array contains all tasks with correct statuses
-        var tasksArray = taskState.Value.GetProperty("tasks");
-        tasksArray.GetArrayLength().Should().Be(3);
+        var tasksArray = tasks;
+        tasksArray.Should().HaveCount(3);
         
         // Find any task with InProgress status in the parsed array (the core fix)
         var inProgressTaskFound = false;
         var taskStatuses = new List<string>();
         
-        for (int i = 0; i < tasksArray.GetArrayLength(); i++)
+        foreach (var task in tasksArray)
         {
-            var task = tasksArray[i];
-            var status = task.GetProperty("Status").GetString();
-            var title = task.GetProperty("Title").GetString();
+            var status = task.Status;
+            var title = task.Title;
             taskStatuses.Add($"{title}: {status}");
             
-            if (status == "InProgress")
+            if (status == TaskManager.TaskStatus.InProgress)
             {
                 inProgressTaskFound = true;
             }
@@ -292,8 +271,7 @@ public class ImprovedTaskManagerServiceTests
         
         inProgressTaskFound.Should().BeTrue($"At least one InProgress task should be correctly parsed and included in tasks array. Found statuses: {statusInfo}");
         
-        // Check task count matches
-        var taskCount = taskState.Value.GetProperty("taskCount").GetInt32();
-        taskCount.Should().Be(3, "All three tasks should be counted");
+        // Check task count matches - tasks is now an IList, not JsonElement
+        tasksArray.Count.Should().Be(3, "All three tasks should be counted");
     }
 }

@@ -2,275 +2,130 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Common Development Commands
+## 📚 Quick Reference Guide
 
-### Client (SvelteKit Frontend)
+### Development Instructions
+All detailed instructions are organized in `.repo-instructions/` directory:
+
+| Category | File | Description |
+|----------|------|-------------|
+| 🛠️ **Commands** | [development-commands.md](.repo-instructions/development-commands.md) | All CLI commands for client, server, and tools |
+| 🏗️ **Architecture** | [architecture-patterns.md](.repo-instructions/architecture-patterns.md) | System design, patterns, and tech stack |
+| 🐛 **Debugging** | [debugging-guide.md](.repo-instructions/debugging-guide.md) | Systematic debugging methodology and tools |
+| 🔄 **Workflow** | [development-workflow.md](.repo-instructions/development-workflow.md) | Development process and best practices |
+| 📦 **Build & Test** | [build-and-test.md](.repo-instructions/build-and-test.md) | Package publishing and testing procedures |
+
+### Code Standards
+| Standard | File | Focus Area |
+|----------|------|------------|
+| 📝 **Naming** | [naming-types.md](.repo-instructions/naming-types.md) | Variable naming and type declarations |
+| ✨ **Quality** | [code-quality.md](.repo-instructions/code-quality.md) | Code style and quality guidelines |
+| 🎯 **Principles** | [core-software-principles.md](.repo-instructions/core-software-principles.md) | SOLID, DRY, KISS principles |
+| ⚡ **Async** | [async-programming.md](.repo-instructions/async-programming.md) | Async/await patterns |
+| 📊 **Data** | [data-handling.md](.repo-instructions/data-handling.md) | Data manipulation standards |
+| ⚠️ **Errors** | [exception-handling.md](.repo-instructions/exception-handling.md) | Error handling patterns |
+| 🔍 **LINQ** | [linq-collections.md](.repo-instructions/linq-collections.md) | LINQ and collection usage |
+| 📋 **Logging** | [logging.md](.repo-instructions/logging.md) | Logging standards and practices |
+
+## 🚀 Quick Start
+
+### Essential Commands
 ```bash
-cd client
-npm install              # Install dependencies
-npm run dev             # Start development server (http://localhost:5173)
-npm run dev:test        # Start test server (port 5173, test mode)
-npm run build           # Build for production
-npm run check           # Type check with svelte-check
-npm run lint            # Run ESLint and Prettier checks
-npm run format          # Format code with Prettier
-npm run test:unit       # Run unit tests (Vitest)
-npm run test:e2e        # Run end-to-end tests (Playwright)
-npm run test            # Run all tests (unit + e2e)
+# Frontend
+cd client && npm install && npm run dev
+
+# Backend  
+cd server && dotnet restore && dotnet watch run
+
+# Tests
+npm run test:e2e      # Client E2E tests
+dotnet test           # Server unit tests
 ```
 
-### Server (ASP.NET 9.0 Backend)
+### Package Management (LmDotnetTools)
 ```bash
-cd server
-dotnet restore          # Install dependencies
-dotnet run              # Start development server
-dotnet watch run        # Start with hot reload
-dotnet build           # Build the project
-dotnet test ../server.Tests  # Run unit tests
-
-# Test environment setup (bypasses launchSettings.json)
-dotnet build -c Debug
-$env:ASPNETCORE_ENVIRONMENT='Test'
-$env:ASPNETCORE_URLS='http://localhost:5099'
-$env:LLM_API_KEY='DUMMY'
-dotnet bin\Debug\net9.0\AIChat.Server.dll
+# Quick publish to local feed
+cd submodules/LmDotnetTools
+powershell -ExecutionPolicy Bypass -File publish-nuget-packages.ps1 -LocalOnly
 ```
+See [build-and-test.md](.repo-instructions/build-and-test.md) for detailed instructions.
 
-### Database Commands (Client-side SQLite with Drizzle)
-```bash
-cd client
-npm run db:push         # Push schema changes to database
-npm run db:generate     # Generate migrations
-npm run db:migrate      # Run migrations
-npm run db:studio       # Open Drizzle Studio
-```
+## 🏛️ Architecture Overview
 
-## Architecture Overview
-
-### Technology Stack
-- **Frontend**: SvelteKit 2.22 + Svelte 5.0, TypeScript 5.0, Tailwind CSS 4.0
-- **Backend**: ASP.NET 9.0 Web API, Entity Framework Core, SignalR
-- **Database**: SQLite (dev), client-side Drizzle ORM + server-side EF Core
-- **AI Integration**: AchieveAi.LmDotnetTools suite with OpenAI provider
-  - See `docs/LmDotNet-doc.md` for detailed middleware, provider, MCP, and caching reference.
-- **Real-time**: SignalR + Server-Sent Events (SSE)
-- **Testing**: Playwright (E2E), Vitest (unit), xUnit (server)
+### Tech Stack
+- **Frontend**: SvelteKit 2.22, Svelte 5.0, TypeScript 5.0, Tailwind CSS 4.0
+- **Backend**: ASP.NET 9.0, SignalR, Entity Framework Core
+- **Database**: SQLite with Drizzle ORM (client) + EF Core (server)
+- **AI**: LmDotnetTools suite - see `docs/LmDotNet-doc.md`
 
 ### Project Structure
 ```
-├── client/          # SvelteKit frontend application
-├── server/          # ASP.NET 9.0 Web API backend  
-├── server.Tests/    # Backend unit tests
-├── shared/          # Shared TypeScript types
-├── docs/           # Comprehensive documentation
-├── scratchpad/     # Development notes and planning
-└── submodules/     # LmDotnetTools AI library
+├── client/              # SvelteKit frontend
+├── server/              # ASP.NET backend
+├── server.Tests/        # Backend tests
+├── shared/              # Shared TypeScript types
+├── submodules/          # LmDotnetTools
+├── .repo-instructions/  # Development guides
+├── scratchpad/          # Work notes (MUST USE)
+└── docs/                # Documentation
 ```
 
-### Key Architectural Patterns
+## 🧠 Critical Development Rules
 
-**Message Rendering System**:
-- Extensible renderer registry in `client/src/lib/renderers/`
-- Dynamic component loading via `MessageRouter.svelte`
-- Support for text, reasoning, and custom message types
-- Collapsible message states managed via stores
+### MUST DO
+1. **Use Scratchpad**: Create session directories in `scratchpad/` for ALL work
+2. **Sequential Thinking**: Break complex problems into documented steps
+3. **Use Checklists**: Track progress systematically
+4. **Test Before Commit**: Run tests before any commits
+5. **Follow Standards**: Reference instruction files for code standards
 
-**Real-time Communication**:
-- SignalR for bidirectional real-time messaging
-- Server-Sent Events (SSE) for structured streaming at `/api/chat/stream-sse`
-- Unified API endpoints in `ChatController` for state changes
-- Message sequencing and ordering via `MessageSequenceService`
+### Key Patterns
+- **Messages**: Flow through `MessageRouter.svelte` for rendering
+- **Real-time**: REST for persistence, SignalR/SSE for updates
+- **Types**: Use shared interfaces from `shared/types/`
+- **Debugging**: Use logs + DuckDB (see [debugging-guide.md](.repo-instructions/debugging-guide.md))
 
-**State Management**:
-- Svelte stores for UI state (`messageState.ts`, `chat.ts`)
-- EF Core with SQLite for server-side persistence
-- File-based LLM response caching in `./llm-cache`
+## 🎭 Development Modes
 
-### Environment Configuration
+Use specialized modes in `.github/chatmodes/` for different tasks:
 
-**Required Environment Variables**:
-- `LLM_API_KEY` - API key for LLM provider (OpenRouter/OpenAI)
-- `LLM_BASE_API_URL` - Base URL for LLM provider (optional)
-- `ASPNETCORE_ENVIRONMENT` - Set to "Test" for test mode
+1. **📝 Spec Writer** → Requirements gathering
+2. **🏗️ Spec to Tasks** → Design and planning  
+3. **👨‍💻 Senior Developer** → Implementation
+4. **🔄 Interactive Dev** → Research and experimentation
 
-**Key Configuration Files**:
-- `client/.env.local` - Frontend environment variables
-- `server/appsettings.Development.json` - Server development settings
-- `server/appsettings.Test.json` - Server test configuration
+See [development-workflow.md](.repo-instructions/development-workflow.md#development-modes) for details.
 
-### Testing Strategy
+## 🔧 Environment Configuration
 
-**End-to-End Tests**: 
-- Located in `client/e2e/`
-- Run with `npm run test:e2e` 
-- Use Playwright for browser automation
-- Test SSE flow, chat functionality, message ordering
+### Required Variables
+- `LLM_API_KEY` - LLM provider API key
+- `LLM_BASE_API_URL` - Provider base URL (optional)
+- `ASPNETCORE_ENVIRONMENT` - Set to "Test" for testing
 
-**Unit Tests**:
-- Client: `client/src/lib/**/*.test.ts` with Vitest
-- Server: `server.Tests/` with xUnit and FluentAssertions
-- Component tests for renderers and message handling
+### Config Files
+- `client/.env.local` - Frontend environment
+- `server/appsettings.{Environment}.json` - Server settings
 
-**Test Environment**:
-- HTTP-only server on port 5099
-- In-memory database reset on each run
-- Disabled LLM cache for isolated testing
+## 📊 Logging & Debugging
 
-### Development Workflow
+### Log Locations
+- Server: `logs/server/app-{env}.jsonl`
+- Client: `logs/client/app.jsonl`
 
-**Hot Reload Setup**:
-```bash
-# Terminal 1: Client with hot reload
-cd client && npm run dev
-
-# Terminal 2: Server with hot reload  
-cd server && dotnet watch run
+### Query with DuckDB
+```sql
+SELECT * FROM read_json_auto('logs/server/app-test.jsonl')
+WHERE level = 'Error' ORDER BY timestamp DESC;
 ```
 
-**Available Tools**:
-- **DuckDB**: v1.3.2 (Ossivalis) - Available for data analysis and SQL operations
+## 🎯 Important Notes
 
-**Logging & Debugging**:
-- **JSONL Logs**: Structured JSON logs written to `logs/server/` and `logs/client/` directories
-- **Trace Level**: Configured for development/testing with verbose logging (Serilog: Verbose, Pino: trace)
-- **DuckDB Integration**: Query logs with SQL for debugging - `SELECT * FROM read_json_auto('logs/server/app-test.jsonl')`
-- **Server Logging**: Serilog with CompactJsonFormatter, includes request tracing, performance metrics
-- **Client Logging**: Pino with HTTP transport to `/api/logs` endpoint, trace level in development
-- **Log Files**:
-  - Server: `logs/server/app-dev.jsonl` (development), `logs/server/app-test.jsonl` (test)  
-  - Client: `logs/client/app.jsonl`
-  - Build: `logs/server/build.logs`
+**Remember**: 
+- Always use `scratchpad/` for notes and learning capture
+- Follow the debugging methodology in [debugging-guide.md](.repo-instructions/debugging-guide.md)
+- Reference instruction files for specific standards
+- Use sequential thinking for complex problems
+- Test thoroughly before committing changes
 
-**Background Process Monitoring**:
-```powershell
-# Find running dev processes
-Get-CimInstance Win32_Process | Where-Object {$_.Name -eq "node.exe"} | Where-Object {$_.CommandLine -like "* dev"}
-Get-CimInstance Win32_Process | Where-Object {$_.Name -eq "dotnet.exe"} | Where-Object {$_.CommandLine -like "*watch*"}
-```
-
-### Important Implementation Notes
-
-**Message Types & Rendering**:
-- All messages flow through `MessageRouter.svelte` for dynamic rendering
-- Renderer registry supports extensible message types beyond text/reasoning
-- Use `RichMessageDto` interface for message payloads
-- Stream completion detection via `▋` character presence
-
-**API Design**:
-- REST endpoints for persistent operations (`ChatController`)
-- SignalR (`ChatHub`) for real-time broadcasts only
-- SSE provides structured JSON events with proper error handling
-- Message sequencing ensures proper ordering across clients
-
-**Database Schema**:
-- Chat entity: Id (string), Title, UserId, CreatedAt/UpdatedAt
-- Message entity: Id, Content, ChatId, IsFromUser, Timestamp
-- User entity: Id, Username, Email, PasswordHash
-
-**Error Handling**:
-- Comprehensive error boundaries in React-style patterns
-- Fallback to `MessageBubble` component on renderer errors
-- Structured error events in SSE responses
-- Proper logging with structured data
-
-### Development Rules
-
-1. **Type Safety**: Always use shared TypeScript interfaces from `shared/types/`
-2. **Hot Reload**: Use `dotnet watch run` and `npm run dev` for development
-3. **Testing**: Run both unit and E2E tests before major changes
-4. **Database**: Schema changes require both client (Drizzle) and server (EF) updates
-5. **Message Rendering**: Add new message types via renderer registry, not hardcoded components
-6. **Real-time**: Use REST for persistence, SignalR/SSE for real-time updates only
-
-### Debugging Rules
-
-Debugging follows followig steps:
-
-- Observe
-- Assert
-- Validate Assertion / Proof of Assertion
-- Plan Fix
-- Apply Fix
-- Validate Fix
-
-To achieve above methodology (in absence of debugger access), you MUST use Logs and 'duckdb' to debug the system.
-
-#### Guide to Debugging Tests
-
-When fixing failed test, it need to be done in step by step process using sequential thinking.
-
-You MUST use temporary notebooks created in `scratchpad/` directory keep track of 1. checklist, 2. learnings, 3. All the approaches tried to fix, 4. and other random tasks that you need to perform.
-
-##### Step 0
-
-**Act & Observe**: Take step to reproduce the bug and observe the behavior and logs of the system.
-
-##### Step 1
-
-**Assert**: Look at the failure, analyze the code and come up with Root Cause Assertion. Take a note of supporting evidence.
-
-##### Step 2
-
-**Proof of Assertion**: Validate the assertion by adding logs to the code and re-running the tests case. Make sure the changes are only for diagnostic purpose.
-
-##### Step 3
-
-**Design & Plan Fix**: If Root Cause is validated, come up with design changes that may address the root cause. Use supporting evidence to check how these design changes will fix the issue. Use sequential thinking where ever necessary.
-
-##### Step 4
-
-**Plan Fix**: Break down the fix into discrete steps / tasks. Make sure we have noted down the `definition of done` for each task.
-
-##### Step 5
-
-**Apply Fix**: Now that fix is broken down in set of tasks, work through the tasks one by one to write the fix
-
-##### Step 6
-
-**Validate Fix**: Validate test fixes. If tests are still broken go back to Step 1 or Step 3 based on if design was incorrect or root cause analysis was incorrect.
-
-## Development Chat Modes
-
-This project includes specialized chat mode instructions in `.github/chatmodes/` for different development workflows. Use these modes for specific tasks:
-
-### 📝 **Specification Writer Mode** (`.github/chatmodes/spec-writer.chatmode.md`)
-**Use for**: Creating new feature specifications and requirements documents
-- Gathering requirements from users through iterative questioning
-- Researching existing solutions and similar features
-- Creating structured specification documents in `docs/features/`
-- Understanding current implementation before proposing changes
-
-### 🏗️ **Spec to Design & Tasks Mode** (`.github/chatmodes/spec-n-design-doc-to-tasks.chatmode.md`)
-**Use for**: Converting requirements into actionable development tasks
-- Creating design documents from specifications
-- Breaking down features into manageable tasks
-- Planning implementation approach and architecture
-- Generating task lists with clear acceptance criteria
-
-### 👨‍💻 **Senior Developer Mode** (`.github/chatmodes/senior-developer.chatmode.md`)
-**Use for**: Implementing features with high code quality standards
-- Working on tasks that have been clearly specified and designed
-- Following SOLID, KISS, and DRY principles
-- Writing unit tests and ensuring code maintainability
-- Performing post-implementation code reviews
-- Creating comprehensive checklists in `scratchpad/{feature-name}/{task-id}/`
-
-### 🔄 **Senior Developer Interactive Mode** (`.github/chatmodes/senior-dev-interactive.chatmode.md`)
-**Use for**: Interactive development with research and refinement
-- Researching codebase patterns before implementation
-- Iterative development with continuous review cycles
-- Maintaining development checklists in `scratchpad/`
-- Following Research → Develop → Review → Cleanup workflow
-
-### Recommended Workflow
-1. **New Feature**: Start with **Spec Writer Mode** to create requirements
-2. **Planning**: Use **Spec to Design & Tasks Mode** to create design docs and task lists
-3. **Implementation**: Use **Senior Developer Mode** for task execution
-4. **Complex Tasks**: Use **Senior Developer Interactive Mode** when extensive research is needed
-
-## Important Notes
-
-**Scratchpad Use**: You MUST use scratchpad to keep your notes. If scratchpad is not used, you tend to **forget the learnings**.
-**Use Checklists**: It's best to use checklist, and store them in scratchpad for tracking of the work.
-**Per Session Directory**: Create directory in scratchpad for current session, relavent to what's being done.
-**Sequential Thinking**: You MUST use sequential thinking to organize your thoughts. It increases accuracy significantly.
+For any specific topic, refer to the appropriate file in `.repo-instructions/` for detailed guidance.

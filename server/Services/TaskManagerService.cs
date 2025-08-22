@@ -22,7 +22,7 @@ public interface ITaskManagerService
     /// Clears the TaskManager for a chat (when chat is deleted)
     /// </summary>
     Task ClearTaskManagerAsync(string chatId, CancellationToken ct = default);
-    
+
     /// <summary>
     /// Gets the current task state as JSON for a chat
     /// </summary>

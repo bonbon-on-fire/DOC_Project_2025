@@ -802,7 +802,7 @@ Get the weather for San Francisco";
         }
         
         // Aggregate messages into CompositeMessage if needed
-        IMessage aggregatedMessage = null;
+        IMessage? aggregatedMessage = null;
         if (replyMessages.Count > 1)
         {
             aggregatedMessage = new CompositeMessage
@@ -820,6 +820,9 @@ Get the weather for San Francisco";
             aggregatedMessage = replyMessages[0];
             messages.Add(aggregatedMessage);
             _output.WriteLine($"Single message, no CompositeMessage needed");
+        }
+        else
+        {
         }
 
         // Assert - Verify CompositeMessage was created and contains expected messages
