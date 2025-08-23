@@ -105,6 +105,10 @@ builder.Services.AddLmConfig(builder.Configuration.GetSection("LmConfig"));
 // Bind AI model selection options
 builder.Services.Configure<AiOptions>(builder.Configuration.GetSection("AI"));
 
+// Configure MCP servers
+builder.Services.Configure<McpConfiguration>(builder.Configuration.GetSection("Mcp"));
+builder.Services.AddSingleton<IMcpClientManager, McpClientManager>();
+
 // Register IStreamingAgent as scoped service
 builder.Services.AddTransient<IStreamingAgent>(
     provider =>

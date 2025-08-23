@@ -326,6 +326,10 @@ public class MessageDto
 
     [JsonPropertyName("sequenceNumber")]
     public int SequenceNumber { get; set; }
+
+    [JsonPropertyName("isHidden")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsHidden { get; set; }
 }
 
 // Shared JSON serializer options with polymorphic configuration

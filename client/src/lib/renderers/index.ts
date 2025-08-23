@@ -69,12 +69,18 @@ export function registerBuiltInRenderers(): void {
 		messageType: 'task_manager_tool_call'
 	};
 
+	// Register UsageRenderer for usage message types (doesn't display anything)
+	const usageRenderer: MessageRenderer<MessageDto> = {
+		messageType: 'usage'
+	};
+
 	registerRenderer('text', textRenderer, true);
 	registerRenderer('reasoning', reasoningRenderer, true);
 	registerRenderer('tool_call', toolCallRenderer, true);
 	registerRenderer('tool_result', toolResultRenderer, true);
 	registerRenderer('tools_aggregate', toolsAggregateRenderer, true);
 	registerRenderer('task_manager_tool_call', taskManagerRenderer, true);
+	registerRenderer('usage', usageRenderer, true);
 
 	console.info(
 		'Built-in message renderers (including tools and task manager) registered successfully'
@@ -102,6 +108,8 @@ export async function getRendererComponent(messageType: string): Promise<any> {
 			return (await import('../components/ToolsCallAggregateRenderer.svelte')).default;
 		case 'task_manager_tool_call':
 			return (await import('./TaskManagerToolCallRenderer.svelte')).default;
+		case 'usage':
+			return (await import('../components/UsageRenderer.svelte')).default;
 		default:
 			console.warn(`No component found for message type '${messageType}', using fallback`);
 			return null;

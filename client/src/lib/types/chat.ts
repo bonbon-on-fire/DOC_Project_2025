@@ -43,7 +43,13 @@ export interface ChatDto {
 	id: string;
 	userId: string;
 	title: string;
-	messages: (TextMessageDto | ReasoningMessageDto | ToolCallMessageDto | MessageDto)[];
+	messages: (
+		| TextMessageDto
+		| ReasoningMessageDto
+		| ToolCallMessageDto
+		| UsageMessageDto
+		| MessageDto
+	)[];
 	createdAt: Date | string;
 	updatedAt: Date | string;
 	tasks?: any; // JsonElement from server containing task state
@@ -55,6 +61,7 @@ export interface MessageDto {
 	role: string;
 	timestamp: Date | string;
 	sequenceNumber: number;
+	isHidden?: boolean;
 	// messageType is emitted by server due to JsonPolymorphic discriminator
 	messageType?: 'text' | 'reasoning' | string;
 }
@@ -95,6 +102,18 @@ export interface ToolResultMessageDto extends MessageDto {
 	messageType?: 'tool_result';
 }
 
+export interface UsageMessageDto extends MessageDto {
+	usage: {
+		promptTokens?: number;
+		completionTokens?: number;
+		totalTokens?: number;
+		reasoningTokens?: number;
+		cacheWriteTokens?: number;
+		cacheReadTokens?: number;
+	};
+	messageType?: 'usage';
+}
+
 // Paired structure for client-side tool call representation
 export interface ToolCallPair {
 	toolCall: ToolCall;
@@ -116,5 +135,12 @@ export interface ClientToolsCallAggregateMessageDto extends MessageDto {
 
 // Extended message type used by renderers
 export interface RichMessageDto extends MessageDto {
-	messageType?: 'text' | 'reasoning' | 'tool_call' | 'tool_result' | 'usage' | string;
+	messageType?:
+		| 'text'
+		| 'reasoning'
+		| 'tool_call'
+		| 'tool_result'
+		| 'usage'
+		| 'tools_aggregate'
+		| string;
 }

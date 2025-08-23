@@ -11,6 +11,8 @@ using AchieveAi.LmDotnetTools.LmCore.Middleware;
 using AIChat.Server.Functions;
 using AchieveAi.LmDotnetTools.Misc.Utils;
 using static AchieveAi.LmDotnetTools.Misc.Utils.TaskManager;
+using AchieveAi.LmDotnetTools.McpMiddleware.Extensions;
+using AchieveAi.LmDotnetTools.McpMiddleware;
 
 namespace AIChat.Server.Services;
 
@@ -22,6 +24,7 @@ public class ChatService : IChatService, IToolResultCallback
     private readonly AiOptions _aiOptions;
     private readonly ITaskManagerService _taskManagerService;
     private readonly IServiceProvider _serviceProvider;
+    private readonly IMcpClientManager _mcpClientManager;
 
     public ChatService(
         IChatStorage storage,
@@ -29,7 +32,8 @@ public class ChatService : IChatService, IToolResultCallback
         ILogger<ChatService> logger,
         IOptions<AiOptions> aiOptions,
         ITaskManagerService taskManagerService,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IMcpClientManager mcpClientManager)
     {
         _storage = storage;
         _streamingAgent = streamingAgent;
@@ -37,6 +41,7 @@ public class ChatService : IChatService, IToolResultCallback
         _aiOptions = aiOptions.Value;
         _taskManagerService = taskManagerService;
         _serviceProvider = serviceProvider;
+        _mcpClientManager = mcpClientManager;
     }
     
     private async Task<FunctionCallMiddleware?> CreateChatSpecificFunctionCallMiddleware(string chatId)
@@ -59,7 +64,28 @@ public class ChatService : IChatService, IToolResultCallback
             registry.AddFunctionsFromObject(taskManager, "TaskManager");
             _logger.LogInformation("Added TaskManager functions for chat {ChatId}", chatId);
             
-            // Build function contracts and handlers
+            // Add MCP clients to the registry
+            try
+            {
+                var mcpClients = await _mcpClientManager.GetActiveClientsAsync();
+                if (mcpClients.Any())
+                {
+                    var mcpLogger = _serviceProvider.GetService<ILogger<McpClientFunctionProvider>>();
+                    await registry.AddMcpClientsAsync(mcpClients, "McpServers", mcpLogger);
+                    _logger.LogInformation("Added {Count} MCP clients to function registry", mcpClients.Count);
+                }
+                else
+                {
+                    _logger.LogInformation("No MCP clients configured or available");
+                }
+            }
+            catch (Exception mcpEx)
+            {
+                _logger.LogError(mcpEx, "Failed to add MCP clients to function registry");
+            }
+            
+            // Build function contracts and handlers with conflict resolution
+            registry.WithConflictResolution(ConflictResolution.PreferMcp);
             var (contracts, handlers) = registry.Build();
             
             if (!contracts.Any())
@@ -102,6 +128,8 @@ public class ChatService : IChatService, IToolResultCallback
     private readonly ConcurrentDictionary<string, (string MessageId, int SequenceNumber)> _toolCallToMessageMap = new();
     // Map ToolCallId to FunctionName for TaskManager detection
     private readonly ConcurrentDictionary<string, string> _toolCallToFunctionMap = new();
+    // Track the last seen tool call ID for sequential streaming updates
+    private string? _lastSeenToolCallId;
 
     // Events for real-time notifications
     public event Func<MessageCreatedEvent, Task>? MessageCreated;
@@ -233,15 +261,6 @@ public class ChatService : IChatService, IToolResultCallback
                     
                     return dto;
                 })
-                .Where(dto => {
-                    // Filter out encrypted reasoning messages from client view
-                    if (dto is ReasoningMessageDto reasoningDto && reasoningDto.Visibility == ReasoningVisibility.Encrypted)
-                    {
-                        _logger.LogInformation("Filtering out encrypted reasoning message from client view: {MessageId}", dto.Id);
-                        return false;
-                    }
-                    return true;
-                })
                 .ToList()
                 : [];
 
@@ -283,8 +302,7 @@ public class ChatService : IChatService, IToolResultCallback
                 var (msgsSuccess, msgsError, msgsMessages) = await _storage.ListChatMessagesOrderedAsync(c.Id);
                 var messages = msgsSuccess
                     ? [.. msgsMessages
-                        .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!)
-                        .Where(dto => !(dto is ReasoningMessageDto reasoningDto && reasoningDto.Visibility == ReasoningVisibility.Encrypted))]
+                        .Select(m => JsonSerializer.Deserialize<MessageDto>(m.MessageJson, MessageSerializationOptions.Default)!)]
                     : new List<MessageDto>();
 
                 chatDtos.Add(new ChatDto
@@ -531,6 +549,7 @@ public class ChatService : IChatService, IToolResultCallback
         _nextSequence = history.Count > 0 ? history.Max(m => m.SequenceNumber) + 1 : 0;
         _toolCallToMessageMap.Clear(); // Clear mapping for new stream
         _toolCallToFunctionMap.Clear(); // Clear function mapping for new stream
+        _lastSeenToolCallId = null; // Clear last seen tool call ID for new stream
         
         _logger.LogInformation("[DEBUG] StreamChatCompletionAsync - ChatId: {ChatId}, History count: {Count}", chatId, history.Count);
         foreach (var msg in history)
@@ -550,7 +569,19 @@ public class ChatService : IChatService, IToolResultCallback
         }
         
         _logger.LogInformation("Making API call to LLM for chat {ChatId}", chatId);
-        var options = new GenerateReplyOptions { ModelId = GetModelId() };
+        var options = new GenerateReplyOptions {
+            ModelId = GetModelId(),
+            ExtraProperties = new Dictionary<string, object?>()
+            {
+                ["reasoning"] = "low"
+                // ["frequency_penalty"] = 1.0f,
+                // ["parallel_tool_calls"] = true,
+                // ["provider"] = new
+                // {
+                //     order = new[] { "chutes" }
+                // }
+            }.ToImmutableDictionary()
+        };
         var streamProcessor = ProcessStream(chatId, userMsgSequence);
 
         // Build middleware chain
@@ -754,6 +785,8 @@ public class ChatService : IChatService, IToolResultCallback
                 {
                     messageIndex++;
                     chunkSequenceId = 0;
+                    // Clear last seen tool call ID when message type changes
+                    _lastSeenToolCallId = null;
                 }
 
                 chunkSequenceId++;
@@ -841,23 +874,60 @@ public class ChatService : IChatService, IToolResultCallback
                         var toolCallMessageId = $"{messageId}";
                         var toolCallSequence = messageIndex + toolCallIndex;
 
-                        // Map ToolCallId to MessageId and SequenceNumber when we first see it during streaming
+                        // Resolve tool_call_id for sequential streaming updates
+                        string effectiveToolCallId;
+
                         if (!string.IsNullOrEmpty(toolCallUpdate.ToolCallId))
                         {
-                            _toolCallToMessageMap.TryAdd(toolCallUpdate.ToolCallId, (toolCallMessageId, toolCallSequence));
+                            // Update with tool_call_id - store as last seen
+                            effectiveToolCallId = toolCallUpdate.ToolCallId;
+                            _lastSeenToolCallId = effectiveToolCallId;
+                            _toolCallToMessageMap.TryAdd(effectiveToolCallId, (toolCallMessageId, toolCallSequence));
+                            
                             _logger.LogInformation(
-                                "Mapped ToolCallId {ToolCallId} to MessageId {MessageId} with Sequence {Sequence} during streaming",
-                                toolCallUpdate.ToolCallId,
-                                toolCallMessageId,
-                                toolCallSequence);
+                                "Established ToolCallId {ToolCallId} for MessageId {MessageId} during streaming",
+                                effectiveToolCallId,
+                                toolCallMessageId);
                         }
+                        else
+                        {
+                            // Update without tool_call_id - use last seen (sequential continuation)
+                            if (!string.IsNullOrEmpty(_lastSeenToolCallId))
+                            {
+                                effectiveToolCallId = _lastSeenToolCallId;
+                                _logger.LogTrace(
+                                    "Reused last seen ToolCallId {ToolCallId} for MessageId {MessageId}",
+                                    effectiveToolCallId,
+                                    toolCallMessageId);
+                            }
+                            else
+                            {
+                                // No last seen tool call ID - this indicates a system bug
+                                _logger.LogError(
+                                    "Tool call update without ToolCallId and no last seen ID - MessageId: {MessageId}, Index: {Index}",
+                                    toolCallMessageId,
+                                    toolCallUpdate.Index ?? toolCallIndex);
+                                throw new InvalidOperationException($"Tool call update without ToolCallId and no last seen ID for message {toolCallMessageId}");
+                            }
+                        }
+
+                        // Create a corrected tool call update with the effective tool_call_id
+                        var correctedToolCallUpdate = string.IsNullOrEmpty(toolCallUpdate.ToolCallId)
+                            ? new ToolCallUpdate
+                            {
+                                ToolCallId = effectiveToolCallId,
+                                Index = toolCallUpdate.Index,
+                                FunctionName = toolCallUpdate.FunctionName,
+                                FunctionArgs = toolCallUpdate.FunctionArgs
+                            }
+                            : toolCallUpdate;
 
                         _logger.LogTrace(
                             "Streaming tool call update - Index: {Index}, FunctionName: {FunctionName}, ArgsLength: {ArgsLength}, ToolCallId: {ToolCallId}",
-                            toolCallUpdate.Index ?? toolCallIndex,
-                            toolCallUpdate.FunctionName ?? "null",
-                            toolCallUpdate.FunctionArgs?.Length ?? 0,
-                            toolCallUpdate.ToolCallId ?? "null");
+                            correctedToolCallUpdate.Index ?? toolCallIndex,
+                            correctedToolCallUpdate.FunctionName ?? "null",
+                            correctedToolCallUpdate.FunctionArgs?.Length ?? 0,
+                            correctedToolCallUpdate.ToolCallId ?? "null");
 
                         _logger.LogInformation(
                             "ToolCall {ToolIndex}/{ToolCount} - ChatId: {ChatId}, MessageId: {MessageId}, Sequence: {Sequence}, ToolName: {ToolName}, ToolId: {ToolId}",
@@ -866,8 +936,8 @@ public class ChatService : IChatService, IToolResultCallback
                             chatId,
                             toolCallMessageId,
                             toolCallSequence,
-                            toolCallUpdate.FunctionName ?? "unknown",
-                            toolCallUpdate.ToolCallId ?? $"idx_{toolCallUpdate.Index}");
+                            correctedToolCallUpdate.FunctionName ?? "unknown",
+                            correctedToolCallUpdate.ToolCallId ?? $"idx_{correctedToolCallUpdate.Index}");
 
                         if (StreamChunkReceived != null)
                         {
@@ -880,7 +950,7 @@ public class ChatService : IChatService, IToolResultCallback
                                     Done = false,
                                     ChunkSequenceId = chunkSequenceId,
                                     SequenceNumber = toolCallSequence, // Unique sequence for each tool
-                                    ToolCallUpdate = toolCallUpdate
+                                    ToolCallUpdate = correctedToolCallUpdate
                                 });
                         }
                         toolCallIndex++;
@@ -911,19 +981,8 @@ public class ChatService : IChatService, IToolResultCallback
         bool isEncryptedReasoning = message is ReasoningMessage reasoningMsg && reasoningMsg.Visibility == ReasoningVisibility.Encrypted;
         
         int nextSequence;
-        if (isEncryptedReasoning)
-        {
-            // Use -1 for encrypted reasoning to exclude from client view
-            nextSequence = -1;
-            _logger.LogInformation(
-                "Persisting encrypted reasoning without sequence number - ChatId: {ChatId}, MessageId: {MessageId}",
-                chatId, fullMessageId);
-        }
-        else
-        {
-            var (_, _, allocatedSequence) = await _storage.AllocateSequenceAsync(chatId);
-            nextSequence = allocatedSequence;
-        }
+        var (_, _, allocatedSequence) = await _storage.AllocateSequenceAsync(chatId);
+        nextSequence = allocatedSequence;
         
         var timestamp = DateTime.UtcNow;
         var messageRecord = message switch
@@ -945,7 +1004,8 @@ public class ChatService : IChatService, IToolResultCallback
                         Timestamp = timestamp,
                         SequenceNumber = nextSequence,
                         Reasoning = reasoning.Reasoning,
-                        Visibility = reasoning.Visibility
+                        Visibility = reasoning.Visibility,
+                        IsHidden = reasoning.Visibility == ReasoningVisibility.Encrypted
                     }, MessageSerializationOptions.Default)
             },
             TextMessage text => new MessageRecord
@@ -982,7 +1042,8 @@ public class ChatService : IChatService, IToolResultCallback
                         Role = usage.Role.ToString(),
                         Timestamp = timestamp,
                         SequenceNumber = nextSequence,
-                        Usage = usage.Usage
+                        Usage = usage.Usage,
+                        IsHidden = true
                     }, MessageSerializationOptions.Default)
             },
             ToolsCallMessage toolsCall => new MessageRecord

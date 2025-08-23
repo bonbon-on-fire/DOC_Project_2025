@@ -168,21 +168,51 @@ export class ToolCallMessageHandler extends BaseMessageHandler {
 				toolCallsMap.set(tc.id, tc);
 			});
 
-			// Process the tool call update - use tool_call_id from server or index
-			const toolCallId =
-				toolCallUpdate.tool_call_id || `${messageId}_tool_${toolCallUpdate.index || 0}`;
+			// Process the tool call update - resolve tool call ID correctly
+			let toolCallId: string;
+			let existingToolCall: any;
 
-			// Get existing tool call or create new one
-			const existingToolCall = toolCallsMap.get(toolCallId) || {
-				id: toolCallId,
-				name: '',
-				args: {},
-				argsJson: ''
-			};
+			if (toolCallUpdate.tool_call_id) {
+				// Use server-provided tool_call_id when available
+				toolCallId = toolCallUpdate.tool_call_id;
+				existingToolCall = toolCallsMap.get(toolCallId);
+			} else {
+				// No tool_call_id provided, find existing tool call by index
+				const targetIndex = toolCallUpdate.index || 0;
+				existingToolCall = currentToolCalls.find((tc: any) => tc.index === targetIndex);
+
+				if (existingToolCall) {
+					// Reuse existing tool call's ID to maintain consistency
+					toolCallId = existingToolCall.id;
+				} else {
+					// Create new fallback ID only if no existing tool call found
+					toolCallId = `${messageId}_tool_${targetIndex}`;
+				}
+			}
+
+			// Create new tool call if none exists
+			if (!existingToolCall) {
+				existingToolCall = {
+					id: toolCallId,
+					name: '',
+					args: {},
+					argsJson: '',
+					index: toolCallUpdate.index || 0
+				};
+			}
 
 			// Update with new data from this chunk
 			if (toolCallUpdate.function_name) {
 				existingToolCall.name = toolCallUpdate.function_name;
+				existingToolCall.function_name = toolCallUpdate.function_name;
+			}
+
+			// Ensure tool_call_id and index are set
+			if (toolCallUpdate.tool_call_id && !existingToolCall.tool_call_id) {
+				existingToolCall.tool_call_id = toolCallUpdate.tool_call_id;
+			}
+			if (toolCallUpdate.index !== undefined && existingToolCall.index === undefined) {
+				existingToolCall.index = toolCallUpdate.index;
 			}
 
 			// Accumulate function arguments (streaming JSON fragments)
@@ -235,8 +265,16 @@ export class ToolCallMessageHandler extends BaseMessageHandler {
 
 		let snapshot = this.getSnapshot(messageId);
 
+		// Create snapshot if it doesn't exist - this handles cases where:
+		// 1. Tool call messages arrive directly as complete messages (cached responses, etc.)
+		// 2. Messages that don't go through streaming phase
 		if (!snapshot) {
-			throw new Error(`No snapshot found for tool call message: ${messageId}`);
+			snapshot = this.initializeMessage(
+				messageId,
+				envelope.chatId,
+				new Date(envelope.ts),
+				envelope.sequenceId
+			);
 		}
 
 		// Validate payload type

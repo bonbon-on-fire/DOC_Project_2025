@@ -1,14 +1,22 @@
 <script lang="ts">
-	import type { MessageDto, TextMessageDto, ReasoningMessageDto } from '$lib/types/chat';
+	import type {
+		MessageDto,
+		TextMessageDto,
+		ReasoningMessageDto,
+		UsageMessageDto
+	} from '$lib/types/chat';
 	import MessageRouter from './MessageRouter.svelte';
 	import { isStreaming } from '$lib/stores/chat';
-	export let messages: (MessageDto | TextMessageDto | ReasoningMessageDto)[] = [];
+	export let messages: (MessageDto | TextMessageDto | ReasoningMessageDto | UsageMessageDto)[] = [];
+
+	// Filter out hidden messages for display while preserving sequence integrity
+	$: visibleMessages = messages.filter((message) => !message.isHidden);
 
 	let chatContainer: HTMLDivElement;
 </script>
 
 <div bind:this={chatContainer} class="mx-auto max-w-4xl space-y-6 px-4 py-6">
-	{#if messages.length === 0}
+	{#if visibleMessages.length === 0}
 		<!-- Empty State -->
 		<div class="py-12 text-center">
 			<svg
@@ -28,12 +36,12 @@
 		</div>
 	{:else}
 		<!-- Messages -->
-		{#each messages as message, index (message.id)}
-			<MessageRouter {message} isLatest={index === messages.length - 1} />
+		{#each visibleMessages as message, index (message.id)}
+			<MessageRouter {message} isLatest={index === visibleMessages.length - 1} />
 		{/each}
 
 		<!-- Trailing streaming indicator when awaiting assistant response -->
-		{#if $isStreaming && messages.length > 0 && messages[messages.length - 1]?.role === 'user'}
+		{#if $isStreaming && visibleMessages.length > 0 && visibleMessages[visibleMessages.length - 1]?.role === 'user'}
 			<div class="flex justify-start">
 				<div class="flex max-w-xs items-start space-x-3 sm:max-w-md lg:max-w-lg xl:max-w-xl">
 					<!-- AI Avatar -->

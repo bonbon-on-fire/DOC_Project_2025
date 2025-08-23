@@ -54,7 +54,14 @@
       "Bash(csc:*)",
       "Bash(test-fix.exe)",
       "WebFetch(domain:lucide.dev)",
-      "Bash(dotnet script:*)"
+      "Bash(dotnet script:*)",
+      "Bash(npm search:*)",
+      "Bash(npm view:*)",
+      "Bash(dotnet user-secrets:*)",
+      "Bash(dotnet nuget list:*)",
+      "Bash(dotnet nuget add source:*)",
+      "Bash(npm test:*)",
+      "Bash(npx vitest run:*)"
     ],
     "deny": [],
     "ask": [],

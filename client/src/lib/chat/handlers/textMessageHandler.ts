@@ -142,8 +142,16 @@ export class TextMessageHandler extends BaseMessageHandler {
 	completeMessage(messageId: string, envelope: MessageCompleteEventEnvelope): MessageDto {
 		let snapshot = this.getSnapshot(messageId);
 
+		// Create snapshot if it doesn't exist - this handles cases where:
+		// 1. Messages arrive directly as complete messages (cached responses, etc.)
+		// 2. Messages that don't go through streaming phase
 		if (!snapshot) {
-			throw new Error(`No snapshot found for text message: ${messageId}`);
+			snapshot = this.initializeMessage(
+				messageId,
+				envelope.chatId,
+				new Date(envelope.ts),
+				envelope.sequenceId
+			);
 		}
 
 		// Validate payload type

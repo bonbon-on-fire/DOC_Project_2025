@@ -119,8 +119,16 @@ export class ReasoningMessageHandler extends BaseMessageHandler {
 	completeMessage(messageId: string, envelope: MessageCompleteEventEnvelope): MessageDto {
 		let snapshot = this.getSnapshot(messageId);
 
+		// Create snapshot if it doesn't exist - this handles cases where:
+		// 1. Encrypted reasoning messages arrive directly as complete messages
+		// 2. Messages that don't go through streaming phase (e.g., cached responses)
 		if (!snapshot) {
-			throw new Error(`No snapshot found for reasoning message: ${messageId}`);
+			snapshot = this.initializeMessage(
+				messageId,
+				envelope.chatId,
+				new Date(envelope.ts),
+				envelope.sequenceId
+			);
 		}
 
 		// Validate payload type
