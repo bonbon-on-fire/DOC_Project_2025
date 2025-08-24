@@ -6,25 +6,21 @@
 // Core renderer interfaces
 export type { MessageRenderer, CustomRenderer } from './renderer.js';
 
-// Streaming interfaces  
+// Streaming interfaces
 export type { StreamingHandler, StreamingUpdate } from './streaming.js';
-
-// Expandable behavior interfaces
-export type { ExpandableComponent } from './expandable.js';
 
 // Message state interfaces
 export type { MessageState, MessageStates } from '../stores/messageState.js';
 
 // Re-export existing chat types for convenience
-export type { 
-  Message, 
-  Chat, 
-  MessageDto, 
-  RichMessageDto,
-  ChatDto,
-  CreateChatRequest,
-  ContinueChatRequest,
-  ChatResponse,
-  StreamChatResponse,
-  ChatHistoryResponse
+export type {
+	Message,
+	Chat,
+	MessageDto,
+	TextMessageDto,
+	ReasoningMessageDto,
+	RichMessageDto,
+	ChatDto,
+	CreateChatRequest,
+	ChatHistoryResponse
 } from './chat.js';

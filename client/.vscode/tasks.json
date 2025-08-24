@@ -6,10 +6,7 @@
 			"type": "shell",
 			"command": "npm run dev",
 			"isBackground": true,
-			"problemMatcher": [
-				"$typescript",
-				"$node-sass"
-			],
+			"problemMatcher": ["$typescript", "$node-sass"],
 			"group": "build"
 		}
 	]
